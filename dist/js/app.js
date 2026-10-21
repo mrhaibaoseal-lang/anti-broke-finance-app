@@ -120,10 +120,17 @@ function renderDashboard(state) {
   dashboardState = state;
   const { survival, highRiskMode, ghostHolds, transactions, cooldownCart, radar, splitBills, walletTank, settings } = state;
 
-  document.body.classList.toggle('high-risk-mode', Boolean(highRiskMode.isHighRisk));
+  const localHour = new Date().getHours();
+  const isLocalLateNight = localHour >= 23 || localHour < 5;
+  const isHighRiskActive = Boolean(highRiskMode?.isHighRisk || isLocalLateNight);
+
+  document.body.classList.toggle('high-risk-mode', isHighRiskActive);
   const hrBanner = $('#highRiskBanner');
-  if (highRiskMode.isHighRisk) {
-    hrBanner.textContent = '🌙 深夜 / 發薪後 72h 高風險防禦開啟中';
+  if (isHighRiskActive) {
+    const reasonText = (highRiskMode?.reasons && highRiskMode.reasons.length > 0)
+      ? highRiskMode.reasons.join(' ＋ ')
+      : `深夜腦波弱時段 (${String(localHour).padStart(2, '0')}:00，23:00~05:00 嚴格管制)`;
+    hrBanner.textContent = `🌙 夜間高風險防禦自動開啟中：${reasonText}`;
     hrBanner.classList.remove('hidden');
     $('#highRiskBtnLabel').textContent = '防禦中';
   } else {

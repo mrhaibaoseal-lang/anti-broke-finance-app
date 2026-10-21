@@ -10,12 +10,18 @@ function formatYMD(dt) {
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
 }
 
+function getTaipeiTodayYMD() {
+  const taipeiDt = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${taipeiDt.getUTCFullYear()}-${pad2(taipeiDt.getUTCMonth() + 1)}-${pad2(taipeiDt.getUTCDate())}`;
+}
+
 /**
  * 1.2 自訂「發薪日生存週期」計算器 (禁止死板以每月 1 號重置)
  */
 function getCycleRangeForDate(dateStr, paydayDay = 10) {
   const safePayday = Math.min(28, Math.max(1, Number(paydayDay) || 10));
-  const ref = dateStr ? new Date(`${dateStr.slice(0, 10)}T00:00:00`) : new Date();
+  const ymd = (dateStr || getTaipeiTodayYMD()).slice(0, 10);
+  const ref = new Date(`${ymd}T00:00:00`);
   const y = ref.getFullYear();
   const m = ref.getMonth();
   const d = ref.getDate();
@@ -222,7 +228,7 @@ function evaluateSurvivalTier(dailySafeAmount) {
 
 function getSurvivalDashboardMetrics(db, referenceDateStr) {
   const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get();
-  const refDate = (referenceDateStr || formatYMD(new Date())).slice(0, 10);
+  const refDate = (referenceDateStr || getTaipeiTodayYMD()).slice(0, 10);
   const cycle = ensureCurrentCycle(db, refDate);
 
   const effectiveIncome = cycle.is_salary_settled && cycle.actual_salary !== null

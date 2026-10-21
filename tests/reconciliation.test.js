@@ -511,6 +511,13 @@ test('12. 修復三大已知問題：現金/悠遊卡自訂負數扣款不歸零
   // (5) 驗證點擊「立即重新抓取最新薪資」(空 payload) 時保留已綁定的雲端班表，不會被空範本歸零
   const repullRes = await handleApiRequest('POST', '/api/shift/sync', {}, new URLSearchParams(), { db });
   assert.equal(repullRes.data.cycle.shift_gross_pay, 2320);
+
+  // (6) 驗證雲端 UTC 時間 17:03（即台灣時間半夜 01:03）自動觸發夜間高風險防禦模式
+  const { getHighRiskModeStatus } = require('../src/services/impulseControlService');
+  const nightStatus = getHighRiskModeStatus(db, '2026-10-21T17:03:00.000Z');
+  assert.equal(nightStatus.taipeiHour, 1);
+  assert.equal(nightStatus.isLateNight, true);
+  assert.equal(nightStatus.isHighRisk, true);
 });
 
 

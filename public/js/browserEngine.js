@@ -788,12 +788,18 @@ function formatYMD(dt) {
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
 }
 
+function getTaipeiTodayYMD() {
+  const taipeiDt = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${taipeiDt.getUTCFullYear()}-${pad2(taipeiDt.getUTCMonth() + 1)}-${pad2(taipeiDt.getUTCDate())}`;
+}
+
 /**
  * 1.2 自訂「發薪日生存週期」計算器 (禁止死板以每月 1 號重置)
  */
 function getCycleRangeForDate(dateStr, paydayDay = 10) {
   const safePayday = Math.min(28, Math.max(1, Number(paydayDay) || 10));
-  const ref = dateStr ? new Date(`${dateStr.slice(0, 10)}T00:00:00`) : new Date();
+  const ymd = (dateStr || getTaipeiTodayYMD()).slice(0, 10);
+  const ref = new Date(`${ymd}T00:00:00`);
   const y = ref.getFullYear();
   const m = ref.getMonth();
   const d = ref.getDate();
@@ -1000,7 +1006,7 @@ function evaluateSurvivalTier(dailySafeAmount) {
 
 function getSurvivalDashboardMetrics(db, referenceDateStr) {
   const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get();
-  const refDate = (referenceDateStr || formatYMD(new Date())).slice(0, 10);
+  const refDate = (referenceDateStr || getTaipeiTodayYMD()).slice(0, 10);
   const cycle = ensureCurrentCycle(db, refDate);
 
   const effectiveIncome = cycle.is_salary_settled && cycle.actual_salary !== null
@@ -1974,13 +1980,43 @@ module.exports = {
 const { getSurvivalDashboardMetrics, evaluateSurvivalTier } = require('./survivalEngine');
 
 /**
+ * 將任意時間轉換為台灣時區 (UTC+8, Asia/Taipei) 的日期與小時資訊，
+ * 解決 Cloudflare Workers 雲端伺服器預設為 UTC (慢 8 小時) 導致半夜未自動觸發夜間防禦的問題
+ */
+function getTaipeiTimeParts(referenceNowIso) {
+  let dt;
+  if (!referenceNowIso) {
+    dt = new Date();
+  } else {
+    const s = String(referenceNowIso).trim();
+    // 若傳入無時區偏移的本地字串，視為台灣時間 (+08:00)
+    const hasTz = /Z$|[+-]\d{2}:?\d{2}$/i.test(s);
+    dt = new Date(hasTz ? s : (s.length === 10 ? `${s}T12:00:00+08:00` : `${s}+08:00`));
+    if (Number.isNaN(dt.getTime())) dt = new Date();
+  }
+  const taipeiMs = dt.getTime() + 8 * 3600 * 1000;
+  const taipeiDt = new Date(taipeiMs);
+  const year = taipeiDt.getUTCFullYear();
+  const month = String(taipeiDt.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(taipeiDt.getUTCDate()).padStart(2, '0');
+  const hour = taipeiDt.getUTCHours();
+  const minute = taipeiDt.getUTCMinutes();
+  return {
+    hour,
+    minute,
+    dateStr: `${year}-${month}-${day}`,
+    timeStr: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  };
+}
+
+/**
  * 3.3 偵測「深夜 (23:00~05:00) 與發薪日後 72 小時內」高風險防禦模式
  */
 function getHighRiskModeStatus(db, referenceNowIso) {
   const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get();
-  const now = referenceNowIso ? new Date(referenceNowIso) : new Date();
-  const hour = now.getHours();
-  const localDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const tp = getTaipeiTimeParts(referenceNowIso);
+  const hour = tp.hour;
+  const localDateStr = tp.dateStr;
 
   const isLateNight = hour >= 23 || hour < 5;
   const metrics = getSurvivalDashboardMetrics(db, localDateStr);
@@ -1989,7 +2025,7 @@ function getHighRiskModeStatus(db, referenceNowIso) {
 
   const isHighRisk = isLateNight || isPostPayday72h || isForced;
   const reasons = [];
-  if (isLateNight) reasons.push(`深夜腦波弱時段 (${String(hour).padStart(2, '0')}:00，23:00~05:00 嚴格管制)`);
+  if (isLateNight) reasons.push(`深夜腦波弱時段 (${tp.timeStr}，23:00~05:00 嚴格管制)`);
   if (isPostPayday72h) reasons.push(`發薪日後 72 小時暴富錯覺期 (週期第 ${metrics.cycle.daysElapsed} 天)`);
   if (isForced && !isLateNight && !isPostPayday72h) reasons.push('手動開啟高風險防禦演習模式');
 
@@ -1998,6 +2034,8 @@ function getHighRiskModeStatus(db, referenceNowIso) {
     isLateNight,
     isPostPayday72h,
     isForced,
+    taipeiHour: hour,
+    taipeiTime: tp.timeStr,
     strictnessLevel: isHighRisk ? 'EXTREME' : 'STANDARD',
     reasons,
     warningBanner: isHighRisk
@@ -2049,7 +2087,8 @@ function evaluateImpulsePurchase(db, payload, options = {}) {
   if (!itemName) throw new Error('請輸入想購買的商品名稱');
 
   const nowIso = options.nowIso || new Date().toISOString();
-  const refDate = nowIso.slice(0, 10);
+  const tp = getTaipeiTimeParts(nowIso);
+  const refDate = tp.dateStr;
   const metrics = getSurvivalDashboardMetrics(db, refDate);
   const highRisk = getHighRiskModeStatus(db, nowIso);
 
