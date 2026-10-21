@@ -1,0 +1,20 @@
+{
+  "name": "anti-broke-finance-app",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "anti-broke-finance-db",
+      "database_id": "cde144b4-5f56-4a49-8e84-55220f173772"
+    }
+  ]
+}
