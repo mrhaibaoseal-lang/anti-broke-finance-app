@@ -431,6 +431,16 @@ test('11. Apple Pay 感應刷卡秒級自動偵測：支援 iOS 錢包「交易�
   assert.equal(metrics.budget.totalSpent, 155);
   assert.equal(metrics.budget.settledSpent, 155);
   assert.equal(metrics.budget.pendingSpent, 0);
+
+  // (4) 驗證新版 iOS AI「描述捷徑」直接傳送極簡文字（無「於...消費」結構，如「麥當勞 NT$165」）也能精準抓出店名與金額
+  const iosAiRes = await handleApiRequest('POST', '/api/notifications/apple-pay', {
+    text: '麥當勞 NT$165',
+    timestamp: '2026-10-23T12:00:00.000Z',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+  assert.equal(iosAiRes.data.result.resultType, 'PENDING_CREATED');
+  assert.equal(iosAiRes.data.result.parsed.normalizedMerchant, '麥當勞');
+  assert.equal(iosAiRes.data.result.parsed.amount, 165);
 });
 
 

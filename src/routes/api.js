@@ -134,10 +134,10 @@ function buildFullDashboardSnapshot(db) {
 
 function buildStructuredApplePayText(body = {}, searchParams = null) {
   const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
-  const directText = body.text || body.rawText || body.message || body.notification || body.body || getParam('text') || getParam('message') || '';
-  const merchant = String(body.merchant || body.store || body.shop || body.name || getParam('merchant') || getParam('store') || getParam('name') || '').trim();
-  const rawAmt = String(body.amount ?? body.money ?? body.price ?? getParam('amount') ?? getParam('price') ?? '').trim();
-  const card = String(body.card || body.cardName || body.pass || getParam('card') || 'Apple Pay 綁定卡').trim();
+  let directText = body.text || body.rawText || body.message || body.notification || body.body || body.input || body.transaction || body.交易 || body.捷徑輸入 || getParam('text') || getParam('message') || getParam('input') || '';
+  const merchant = String(body.merchant || body.store || body.shop || body.name || body.商家 || body.商店 || body.名稱 || getParam('merchant') || getParam('store') || getParam('name') || '').trim();
+  const rawAmt = String(body.amount ?? body.money ?? body.price ?? body.金額 ?? getParam('amount') ?? getParam('price') ?? '').trim();
+  const card = String(body.card || body.cardName || body.pass || body.卡片 || body.票卡 || getParam('card') || 'Apple Pay 綁定卡').trim();
 
   if (merchant || rawAmt) {
     const numMatch = rawAmt.replace(/,/g, '').match(/(\d+)(?:\.\d+)?/);
@@ -147,6 +147,18 @@ function buildStructuredApplePayText(body = {}, searchParams = null) {
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     return `【Apple Pay 感應刷卡】您的 ${card} 於 ${dateStr} ${timeStr} 在「${merchant || 'Apple Pay 特約商店'}」使用 Apple Pay 一般消費 NT$${cleanAmt} 元。`;
   }
+
+  // 若 iOS AI 捷徑自動產生了其他自訂 JSON 欄位名稱，自動將所有文字/數值欄位合併解析
+  if (!directText && body && typeof body === 'object') {
+    const vals = Object.entries(body)
+      .filter(([k, v]) => k !== '_clientState' && k !== 'source' && k !== 'timestamp' && k !== 'referenceDate' && (typeof v === 'string' || typeof v === 'number'))
+      .map(([, v]) => String(v).trim())
+      .filter(Boolean);
+    if (vals.length > 0) {
+      directText = vals.join(' ');
+    }
+  }
+
   if (directText && !/Apple\s*Pay/i.test(directText)) {
     return `【Apple Pay 感應刷卡】${directText}`;
   }

@@ -994,6 +994,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  $('#btnCopyIosAiPrompt')?.addEventListener('click', async () => {
+    const base = window.location?.origin || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev';
+    const aiPrompt = `使用「取得 URL 內容」對 ${base}/api/notifications/apple-pay 發送 POST 要求，要求主體選擇 JSON，新增文字欄位 text 並設為「捷徑輸入」`;
+    try {
+      await navigator.clipboard.writeText(aiPrompt);
+      showAutoToast('✨ 已複製 iOS 捷徑 AI 提示詞！請直接貼入 iPhone「描述捷徑」輸入框');
+    } catch (_) {
+      prompt('請複製以下 iOS 捷徑 AI 提示詞貼入「描述捷徑」：', aiPrompt);
+    }
+  });
+
   $('#btnCopyApplePayUrl')?.addEventListener('click', async () => {
     const base = window.location?.origin || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev';
     const url = `${base}/api/notifications/apple-pay?merchant=商店名稱&amount=消費金額&card=ApplePay`;

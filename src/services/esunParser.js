@@ -335,6 +335,24 @@ function parseEsunNotification(rawText, options = {}) {
     rawMerchant = '玉山薪資轉帳';
   }
 
+  // 5.5 針對新版 iOS AI 捷徑或極簡 Apple Pay 交易文字（如「星巴克 NT$155」或「NT$155 麥當勞」）的智慧店名擷取兜底
+  if (rawMerchant === '未知商店' && channelType === 'CHANNEL_A_AUTH') {
+    const residual = cleanText
+      .replace(/【[^】]*】/g, ' ')
+      .replace(/\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?/g, ' ')
+      .replace(/\d{1,2}[\/\-月]\d{1,2}日?/g, ' ')
+      .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, ' ')
+      .replace(/(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)\s*[0-9,]+(?:\.[0-9]+)?\s*元?/gi, ' ')
+      .replace(/[0-9,]+(?:\.[0-9]+)?\s*元/g, ' ')
+      .replace(/(?:Apple\s*Pay|感應刷卡|一般消費|刷卡消費|消費通知|刷卡通知|交易通知|使用|您的|玉山銀行卡|玉山銀行|玉山信用卡|玉山簽帳金融卡|玉山簽帳卡|玉山Wallet|玉山\s*U\s*Bear|信用卡|簽帳金融卡|簽帳卡|綁定卡|末四碼\s*\d{4}|末4碼\s*\d{4})/gi, ' ')
+      .replace(/[，,。；;：:（）()「」『』\[\]\-]+/g, ' ')
+      .trim();
+    const tokens = residual.split(/\s+/).filter(t => t && !/^\d+$/.test(t) && !headerIgnoreRegex.test(t));
+    if (tokens.length > 0) {
+      rawMerchant = tokens.slice(0, 2).join(' ');
+    }
+  }
+
   const normalizedMerchant = normalizeMerchant(rawMerchant);
   const classification = classifyTransaction(rawMerchant, normalizedMerchant, amount, cleanText);
 

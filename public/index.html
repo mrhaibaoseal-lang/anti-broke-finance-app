@@ -11,7 +11,7 @@
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261021v5" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261021v6" />
 </head>
 <body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -504,19 +504,28 @@
           <span class="px-2 py-0.5 rounded-full bg-white text-indigo-700 font-semibold text-[10px] border border-indigo-200">Apple Pay + 銀行防重</span>
         </div>
 
-        <!-- 專屬 Apple Pay 感應刷卡秒級自動偵測卡片 -->
+        <!-- 專屬 Apple Pay 感應刷卡秒級自動偵測卡片 (支援新版 iOS AI「描述捷徑」提示詞) -->
         <div class="bg-slate-900 text-white rounded-2xl p-3.5 space-y-2.5 shadow-sm">
           <div class="flex items-center justify-between">
             <span class="font-bold text-sm flex items-center gap-1.5">
               <i class="fa-brands fa-apple text-base"></i> 方式 A：Apple Pay 感應「1 秒全自動記帳」
             </span>
-            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">iOS 錢包原生觸發</span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">支援新版 iOS AI 捷徑</span>
           </div>
-          <p class="text-[11px] text-slate-300 leading-relaxed">
-            iPhone「捷徑 ➔ 自動化 ➔ <b>交易 (Transaction)</b>」勾選任一 Apple Pay 卡片（選<b>立即執行</b>），加入「取得 URL 內容」貼上下方專屬網址（帶入 <code class="text-emerald-300 font-mono">merchant=商家&amp;amount=金額</code>），<b>拿手機感應刷卡瞬間 1 秒自動入帳！</b>且事後收到玉山銀行通知信會自動合併、絕不重複扣款！
-          </p>
+
+          <div class="rounded-xl bg-white/10 p-2.5 space-y-1.5 text-[11px] text-slate-200 leading-relaxed border border-white/10">
+            <div class="font-bold text-amber-300">💡 看到 iOS「你想要捷徑執行什麼動作？（描述捷徑）」畫面時：</div>
+            <div><b>方法 1（直接餵給 iOS AI）</b>：點下方<b>「✨ 複製 iOS 捷徑 AI 提示詞」</b>，直接貼進「描述捷徑」輸入框送出，AI 會自動幫你組裝好！</div>
+            <div><b>方法 2（關掉 AI 框回傳統模式）</b>：點畫面<b>右下角的「✕」</b>或<b>右上角的「編輯」</b>，即可直接搜尋「取得 URL 內容」！</div>
+            <div class="text-emerald-300 font-semibold pt-0.5">⚡ 記得從捷徑底部「自動化」➔「＋」➔「交易 (Transaction)」設為「立即執行」，感應刷卡才會自動觸發！</div>
+          </div>
+
+          <button type="button" id="btnCopyIosAiPrompt" class="btn-press w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> ✨ 一鍵複製「iOS 捷徑 AI 提示詞」（直接貼入描述捷徑）
+          </button>
+
           <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="btnCopyApplePayUrl" class="btn-press py-2 px-2.5 rounded-xl bg-white text-slate-900 font-bold text-xs flex items-center justify-center gap-1">
+            <button type="button" id="btnCopyApplePayUrl" class="btn-press py-2 px-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-semibold text-xs flex items-center justify-center gap-1">
               <i class="fa-brands fa-apple"></i> 複製 Apple Pay 網址
             </button>
             <button type="button" id="btnSimulateApplePay" class="btn-press py-2 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
@@ -726,8 +735,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v5"></script>
-  <script src="/js/app.js?v=20261021v5"></script>
+  <script src="/js/browserEngine.js?v=20261021v6"></script>
+  <script src="/js/app.js?v=20261021v6"></script>
 </body>
 </html>
 
