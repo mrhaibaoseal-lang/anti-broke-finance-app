@@ -6,12 +6,17 @@
   <meta name="theme-color" content="#090A0F" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="防破產記帳" />
+  <meta name="apple-mobile-web-app-title" content="餘額守門員" />
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
   <link rel="manifest" href="/manifest.json" />
-  <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
+  <title>餘額守門員 GuardPay｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261022v15" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261022v16" />
 </head>
 <body class="min-h-screen selection:bg-[#0A84FF]/30 selection:text-white">
 
@@ -22,11 +27,11 @@
   <header class="sticky top-0 z-30 bg-[#090A0F]/80 backdrop-blur-xl border-b border-white/[0.08]">
     <div class="max-w-2xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
       <div class="flex items-center gap-3 min-w-0">
-        <div class="w-10 h-10 rounded-xl bg-[#0A84FF]/15 border border-[#0A84FF]/30 text-[#0A84FF] grid place-items-center text-base shrink-0 shadow-sm">
-          <i class="fa-solid fa-shield-heart"></i>
+        <div class="w-10 h-10 rounded-xl bg-transparent border border-sky-500/30 grid place-items-center shrink-0 shadow-sm overflow-hidden p-0.5">
+          <img src="/icons/icon.svg" class="w-full h-full object-contain" alt="GuardPay Logo" />
         </div>
         <div class="min-w-0">
-          <h1 class="text-base sm:text-lg font-semibold tracking-tight text-[#F5F5F7] truncate">防破產記帳</h1>
+          <h1 class="text-base sm:text-lg font-semibold tracking-tight text-[#F5F5F7] truncate">餘額守門員</h1>
           <p class="text-xs text-[#8E95A5] tabular-nums">預算週期 <span id="cycleDateLabel">--</span></p>
         </div>
       </div>
@@ -48,7 +53,7 @@
   <main class="max-w-2xl mx-auto px-4 sm:px-6 pt-6 pb-32 space-y-6">
     <div id="alertStack" class="space-y-3"></div>
 
-    <!-- ==================== 分頁 1：【首頁 / 總覽】 ==================== -->
+    <!-- ==================== 分頁 1：【首頁總覽】 ==================== -->
     <section id="tab-home" class="tab-pane space-y-6">
 
       <!-- 1. 本月剩餘可用額度主卡片 (Apple Wallet Card 風格) -->
@@ -93,25 +98,176 @@
         <div id="tierAdviceText" class="text-xs text-[#8E95A5] apple-inset !py-3.5 !px-4 leading-relaxed"></div>
       </div>
 
-      <!-- 2. 現金 ＆ 悠遊卡水庫與日常記帳中心 (Apple Settings 分組卡片) -->
+      <!-- 2. 首頁快捷行動中樞 (Quick Actions) -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <button type="button" id="btnHomeQuickCash" class="btn-press bento-card !p-4 flex flex-col items-center justify-center gap-2 text-center group hover:border-[#0A84FF]/40">
+          <span class="w-10 h-10 rounded-2xl bg-[#0A84FF]/15 text-[#0A84FF] grid place-items-center text-base group-hover:scale-110 transition-transform">
+            <i class="fa-solid fa-pen-to-square"></i>
+          </span>
+          <div>
+            <div class="text-xs font-semibold text-[#F5F5F7]">記現金消費</div>
+            <div class="text-[11px] text-[#8E95A5]">登記外食/零錢</div>
+          </div>
+        </button>
+
+        <button type="button" id="btnHomeQuickAtm" class="btn-press bento-card !p-4 flex flex-col items-center justify-center gap-2 text-center group hover:border-emerald-500/40">
+          <span class="w-10 h-10 rounded-2xl bg-emerald-500/15 text-emerald-400 grid place-items-center text-base group-hover:scale-110 transition-transform">
+            <i class="fa-solid fa-arrow-up-from-bracket"></i>
+          </span>
+          <div>
+            <div class="text-xs font-semibold text-[#F5F5F7]">存入金融卡</div>
+            <div class="text-[11px] text-[#8E95A5]">ATM 現金入帳</div>
+          </div>
+        </button>
+
+        <button type="button" id="btnHomeQuickImpulse" class="btn-press bento-card !p-4 flex flex-col items-center justify-center gap-2 text-center group hover:border-rose-500/40">
+          <span class="w-10 h-10 rounded-2xl bg-rose-500/15 text-rose-400 grid place-items-center text-base group-hover:scale-110 transition-transform">
+            <i class="fa-solid fa-fire-extinguisher"></i>
+          </span>
+          <div>
+            <div class="text-xs font-semibold text-[#F5F5F7]">想買急救</div>
+            <div class="text-[11px] text-[#8E95A5]">72h 工時拷問</div>
+          </div>
+        </button>
+
+        <button type="button" id="btnHomeQuickNotif" class="btn-press bento-card !p-4 flex flex-col items-center justify-center gap-2 text-center group hover:border-amber-500/40">
+          <span class="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-400 grid place-items-center text-base group-hover:scale-110 transition-transform">
+            <i class="fa-solid fa-bolt"></i>
+          </span>
+          <div>
+            <div class="text-xs font-semibold text-[#F5F5F7]">刷卡偵測</div>
+            <div class="text-[11px] text-[#8E95A5]">玉山通知對帳</div>
+          </div>
+        </button>
+      </div>
+
+      <!-- 3. 水庫速覽 (皮包現金 & 悠遊卡) 雙卡 -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <button type="button" id="btnHomeGoWalletCash" class="btn-press bento-card p-5 text-left flex items-center justify-between gap-4 group">
+          <div class="flex items-center gap-3.5 min-w-0">
+            <div class="w-11 h-11 rounded-2xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 grid place-items-center text-lg shrink-0">
+              <i class="fa-solid fa-money-bill-1-wave"></i>
+            </div>
+            <div class="min-w-0 space-y-0.5">
+              <div class="text-xs text-[#8E95A5] flex items-center gap-1.5">
+                <span>皮包現金餘額</span>
+                <span class="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.5 rounded">水庫</span>
+              </div>
+              <div id="homeCashVal" class="text-2xl font-bold text-[#F5F5F7] tabular-nums tracking-tight">$0</div>
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <span class="text-xs text-[#0A84FF] font-medium group-hover:translate-x-0.5 inline-block transition-transform">前往錢包 →</span>
+          </div>
+        </button>
+
+        <button type="button" id="btnHomeGoWalletEasy" class="btn-press bento-card p-5 text-left flex items-center justify-between gap-4 group">
+          <div class="flex items-center gap-3.5 min-w-0">
+            <div class="w-11 h-11 rounded-2xl bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/25 grid place-items-center text-lg shrink-0">
+              <i class="fa-solid fa-credit-card"></i>
+            </div>
+            <div class="min-w-0 space-y-0.5">
+              <div class="text-xs text-[#8E95A5] flex items-center gap-1.5">
+                <span>悠遊卡目前餘額</span>
+                <span class="text-[10px] text-sky-400/80 bg-[#0A84FF]/10 px-1.5 py-0.5 rounded">水庫</span>
+              </div>
+              <div id="homeEasyVal" class="text-2xl font-bold text-[#F5F5F7] tabular-nums tracking-tight">$0</div>
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <span class="text-xs text-[#0A84FF] font-medium group-hover:translate-x-0.5 inline-block transition-transform">前往錢包 →</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- 4. 本月概覽雙欄卡 (對帳花費 & 忍住省下) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <button type="button" id="cardGoTransactions" class="bento-card p-6 text-left space-y-4 btn-press flex flex-col justify-between">
+          <div class="flex items-center justify-between w-full">
+            <span class="text-sm font-semibold text-[#D1D5DB] flex items-center gap-2">
+              <i class="fa-solid fa-receipt text-rose-400"></i>
+              <span>本月花費 ＆ 存款</span>
+            </span>
+            <span class="text-xs text-[#0A84FF]">查看明細 →</span>
+          </div>
+          <div class="space-y-1">
+            <div class="text-xs text-[#8E95A5]">已花費總計</div>
+            <div id="metricSpent" class="text-3xl font-bold tracking-tight text-[#F5F5F7] tabular-nums">$0</div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 pt-1 text-xs">
+            <span class="px-2.5 py-1 rounded-full bg-emerald-500/12 text-emerald-300 font-medium tabular-nums border border-emerald-500/20">
+              存入 <span id="cardDepositedTotalVal">+$0</span>
+            </span>
+            <span class="px-2.5 py-1 rounded-full bg-amber-500/12 text-amber-300 font-medium tabular-nums border border-amber-500/20">
+              圈存 <span id="pendingSpentVal">$0</span>
+            </span>
+            <span class="px-2.5 py-1 rounded-full bg-[#0A84FF]/15 text-sky-300 font-medium tabular-nums border border-[#0A84FF]/25">
+              現金 <span id="cashSpentVal">$0</span>
+            </span>
+          </div>
+        </button>
+
+        <button type="button" id="cardGoCooldown" class="bento-card p-6 text-left space-y-4 btn-press flex flex-col justify-between">
+          <div class="flex items-center justify-between w-full">
+            <span class="text-sm font-semibold text-[#D1D5DB] flex items-center gap-2">
+              <i class="fa-solid fa-piggy-bank text-emerald-400"></i>
+              <span>72h 防剁忍住省下</span>
+            </span>
+            <span class="text-xs text-emerald-400">防剁專區 →</span>
+          </div>
+          <div class="space-y-1">
+            <div class="text-xs text-[#8E95A5]">成功省下金額</div>
+            <div id="savedTotalVal" class="text-3xl font-bold text-emerald-400 tabular-nums">$0</div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 pt-1 text-xs text-[#8E95A5] tabular-nums">
+            <span class="px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-[#D1D5DB]">
+              ⏱️ 少站工時 <b id="savedHoursVal" class="text-emerald-300">0</b>h
+            </span>
+            <span class="px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-[#D1D5DB]">
+              🏆 成功省下 <b id="savedCountVal" class="text-emerald-300">0</b> 件
+            </span>
+          </div>
+        </button>
+      </div>
+
+      <!-- 5. 最新交易動態精簡預覽 -->
+      <div class="bento-card p-6 sm:p-7 space-y-4">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2 h-2 rounded-full bg-[#0A84FF]"></span>
+            <h2 class="text-base font-semibold text-[#F5F5F7]">最新交易動態</h2>
+          </div>
+          <button type="button" id="btnHomeViewAllTx" class="btn-press btn-secondary px-3.5 py-1.5 rounded-full text-xs text-[#0A84FF]">
+            查看全部明細 →
+          </button>
+        </div>
+        <div id="homeRecentTxList" class="space-y-2.5">
+          <div class="text-center py-4 text-xs text-[#8E95A5]">正在載入最新交易...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 2：【錢包水庫】 ==================== -->
+    <section id="tab-wallet" class="tab-pane hidden space-y-6">
+
+      <!-- 1. 現金 ＆ 悠遊卡水庫主卡片 -->
       <div class="bento-card p-6 sm:p-8 space-y-6">
-        <!-- 卡片標題區 -->
         <div class="flex items-start justify-between gap-4">
           <div class="flex items-center gap-3">
             <span class="w-10 h-10 rounded-xl bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/25 grid place-items-center text-base shrink-0">
               <i class="fa-solid fa-wallet"></i>
             </span>
             <div>
-              <h2 class="text-lg font-semibold text-[#F5F5F7] tracking-tight">現金 ＆ 悠遊卡即時控制</h2>
-              <p class="text-xs text-[#8E95A5]">領現花用直接登記 · 去 ATM 存進金融卡一鍵轉入</p>
+              <h2 class="text-lg font-semibold text-[#F5F5F7] tracking-tight">現金 ＆ 悠遊卡水庫控制</h2>
+              <p class="text-xs text-[#8E95A5]">即時快調手頭現鈔 · 超商與小吃零錢即時登記</p>
             </div>
           </div>
-          <span class="px-3 py-1 rounded-full bg-white/[0.06] text-[#8E95A5] text-xs font-medium border border-white/[0.08] shrink-0">首頁快控</span>
+          <span class="px-3 py-1 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium border border-emerald-500/25 shrink-0">水庫防線</span>
         </div>
 
         <div id="tankAuditBanner" class="hidden rounded-xl bg-amber-500/12 border border-amber-500/25 p-4 text-xs font-medium text-amber-300"></div>
 
-        <!-- 分組 A：雙水庫餘額與快調 (響應式雙欄) -->
+        <!-- 雙水庫餘額與快調 -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- 皮包現金子卡 -->
           <div class="apple-inset space-y-4 flex flex-col justify-between">
@@ -170,7 +326,7 @@
 
         <hr class="apple-divider" />
 
-        <!-- 分組 B：使用現金消費・直接登記明細 -->
+        <!-- 登記現金消費 -->
         <div class="apple-inset space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <h3 class="text-[15px] font-semibold text-[#F5F5F7] flex items-center gap-2">
@@ -204,14 +360,14 @@
           </button>
         </div>
 
-        <!-- 分組 C：往金融卡存錢 (ATM 存款入帳) -->
+        <!-- 往金融卡存錢 (ATM 存款入帳) -->
         <div class="apple-inset space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <h3 class="text-[15px] font-semibold text-[#F5F5F7] flex items-center gap-2">
               <i class="fa-solid fa-building-columns text-emerald-400"></i>
               <span>往金融卡存錢（ATM 存款入帳）</span>
             </h3>
-            <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium border border-emerald-500/25">支援通知自動抓</span>
+            <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium border border-emerald-500/25">自動累加預算</span>
           </div>
 
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -228,18 +384,18 @@
           </label>
         </div>
 
-        <!-- 分組 D：盤點設定與水庫明細摺疊區 -->
+        <!-- 盤點設定與水庫明細摺疊區 -->
         <details class="group apple-inset !p-0 overflow-hidden">
           <summary class="cursor-pointer px-4 py-3.5 flex items-center justify-between text-xs font-medium text-[#D1D5DB] hover:text-white transition-colors">
             <span class="flex items-center gap-2">
               <i class="fa-solid fa-sliders text-[#8E95A5]"></i>
-              <span>盤點設定現金 / 悠遊卡總餘額 ＆ 水庫明細紀錄</span>
+              <span>盤點設定現金 / 悠遊卡總餘額 ＆ 水庫變動明細</span>
             </span>
             <i class="fa-solid fa-chevron-down text-xs text-[#8E95A5] group-open:rotate-180 transition-transform"></i>
           </summary>
           <div class="px-4 pb-4 pt-2 border-t border-white/[0.06] space-y-4">
             <p class="text-xs text-[#8E95A5] leading-relaxed">
-              輸入<b class="text-[#F5F5F7]">正數</b>（如 <code class="text-emerald-300">1500</code>）可直接設定目前總餘額；輸入<b class="text-[#F5F5F7]">負數</b>（如 <code class="text-rose-300">-80</code>）則從目前餘額扣減：
+              輸入<b class="text-[#F5F5F7]">正數</b>（如 <code class="text-emerald-300">1500</code>）可直接校準目前總餘額；輸入<b class="text-[#F5F5F7]">負數</b>（如 <code class="text-rose-300">-80</code>）則從目前餘額扣減：
             </p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input id="auditCashInput" type="text" inputmode="text" class="input-fintech text-xs" placeholder="設定皮包現金總額 $" />
@@ -252,78 +408,29 @@
           </div>
         </details>
       </div>
+    </section>
 
-      <!-- 3. 金融卡存款紀錄 & 扣款與消費紀錄 雙欄概覽卡 -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <button type="button" id="cardGoDeposits" class="bento-card p-6 text-left space-y-4 btn-press flex flex-col justify-between">
-          <div class="flex items-center justify-between w-full">
-            <span class="text-sm font-semibold text-[#D1D5DB]">金融卡存款紀錄</span>
-            <span class="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-400 grid place-items-center text-xs">
-              <i class="fa-solid fa-arrow-trend-up"></i>
-            </span>
-          </div>
-          <div id="cardDepositedTotalVal" class="text-3xl font-bold tracking-tight text-emerald-400 tabular-nums">+$0</div>
-          <div class="flex flex-wrap items-center gap-2 pt-1">
-            <span class="px-2.5 py-1 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium tabular-nums border border-emerald-500/20">
-              🏧 存入 <span id="depositCountBadge">0</span> 筆
-            </span>
-            <span class="px-2.5 py-1 rounded-full bg-white/[0.06] text-[#8E95A5] text-xs font-medium">
-              點此看明細 →
-            </span>
-          </div>
-        </button>
+    <!-- ==================== 分頁 3：【對帳與明細】 ==================== -->
+    <section id="tab-records" class="tab-pane hidden space-y-6">
 
-        <button type="button" id="cardGoTransactions" class="bento-card p-6 text-left space-y-4 btn-press flex flex-col justify-between">
-          <div class="flex items-center justify-between w-full">
-            <span class="text-sm font-semibold text-[#D1D5DB]">扣款與消費紀錄</span>
-            <span class="w-8 h-8 rounded-full bg-rose-500/15 text-rose-400 grid place-items-center text-xs">
-              <i class="fa-solid fa-receipt"></i>
-            </span>
-          </div>
-          <div id="metricSpent" class="text-3xl font-bold tracking-tight text-[#F5F5F7] tabular-nums">$0</div>
-          <div class="flex flex-wrap items-center gap-2 pt-1">
-            <span class="px-2.5 py-1 rounded-full bg-amber-500/12 text-amber-300 text-xs font-medium tabular-nums border border-amber-500/20">
-              圈存 <span id="pendingSpentVal">$0</span>
-            </span>
-            <span class="px-2.5 py-1 rounded-full bg-white/[0.06] text-[#D1D5DB] text-xs font-medium tabular-nums">
-              已扣 <span id="settledSpentVal">$0</span>
-            </span>
-            <span class="px-2.5 py-1 rounded-full bg-[#0A84FF]/15 text-sky-300 text-xs font-medium tabular-nums border border-[#0A84FF]/25">
-              現金 <span id="cashSpentVal">$0</span>
-            </span>
-          </div>
-        </button>
+      <!-- 1. 三欄收支概況卡 -->
+      <div class="bento-card p-6 grid grid-cols-3 divide-x divide-white/[0.07] text-center">
+        <div class="px-2 space-y-1">
+          <div class="text-xs text-[#8E95A5]">金融卡存款</div>
+          <div id="txSummaryDeposited" class="text-base font-bold text-emerald-400 tabular-nums">+$0</div>
+        </div>
+        <div class="px-2 space-y-1">
+          <div class="text-xs text-[#8E95A5]">刷卡扣款</div>
+          <div id="txSummaryCardSpent" class="text-base font-bold text-rose-400 tabular-nums">-$0</div>
+        </div>
+        <div class="px-2 space-y-1">
+          <div class="text-xs text-[#8E95A5]">現金消費</div>
+          <div id="txSummaryCashSpent" class="text-base font-bold text-sky-400 tabular-nums">-$0</div>
+        </div>
       </div>
 
-      <!-- 4. 防剁手急救入口 & 忍住省下統計 -->
-      <div class="grid grid-cols-1 sm:grid-cols-12 gap-4">
-        <button id="btnOpenImpulseModal" class="sm:col-span-8 bento-card p-6 btn-press flex items-center justify-between gap-4 border-[#0A84FF]/30 bg-gradient-to-r from-[#151821] to-[#172236]">
-          <div class="flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-[#0A84FF] text-white grid place-items-center text-lg shrink-0 shadow-md shadow-[#0A84FF]/25">
-              <i class="fa-solid fa-fire-extinguisher"></i>
-            </div>
-            <div class="text-left space-y-1">
-              <div class="text-base font-semibold text-[#F5F5F7] tracking-tight">➕ 我又想買東西了</div>
-              <div class="text-xs text-[#8E95A5]">啟動血汗工時換算 · 72 小時冷卻鎖</div>
-            </div>
-          </div>
-          <div class="w-8 h-8 rounded-full bg-white/[0.08] grid place-items-center text-xs text-[#D1D5DB] shrink-0">
-            <i class="fa-solid fa-chevron-right"></i>
-          </div>
-        </button>
-
-        <button type="button" id="cardGoCooldown" class="sm:col-span-4 bento-card p-6 text-left flex flex-col justify-between gap-2 btn-press">
-          <div class="text-xs font-medium text-[#8E95A5] flex items-center justify-between w-full">
-            <span>忍住省下</span>
-            <i class="fa-solid fa-piggy-bank text-emerald-400"></i>
-          </div>
-          <div id="savedTotalVal" class="text-2xl font-bold text-emerald-400 tabular-nums">$0</div>
-          <div class="text-xs text-[#8E95A5] tabular-nums">少站 <span id="savedHoursVal">0</span>h (<span id="savedCountVal">0</span>件)</div>
-        </button>
-      </div>
-
-      <!-- 5. 玉山「ATM 存款 ＋ 刷卡扣款」全自動偵測與對帳工具卡 -->
-      <div class="bento-card p-6 sm:p-8 space-y-4">
+      <!-- 2. 玉山「ATM 存款 ＋ 刷卡扣款」全自動偵測與對帳工具卡 -->
+      <div class="bento-card p-6 sm:p-7 space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -333,67 +440,23 @@
         </div>
 
         <p class="text-xs text-[#8E95A5] leading-relaxed">
-          不論是去 ATM 把現金存進金融卡的「存款通知」，或是 Apple Pay / 簽帳卡刷卡的「圈存與請款扣款通知」，系統都能自動辨識並分別寫入存款與扣款紀錄。
+          不論是去 ATM 把現金存進金融卡的存款通知，或是 Apple Pay / 簽帳卡刷卡的圈存與請款扣款通知，系統都能自動辨識並分別寫入存款與扣款紀錄。
         </p>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
           <button id="btnOpenNotifModal" class="btn-press btn-primary py-3 px-4 text-xs flex items-center justify-center gap-2">
             <i class="fa-solid fa-bolt"></i>
-            <span>通知偵測 / 模擬</span>
+            <span>通知偵測 / 模擬器</span>
           </button>
           <button id="btnOpenBalanceSync" class="btn-press btn-secondary py-3 px-4 text-xs flex items-center justify-center gap-2">
             <i class="fa-solid fa-scale-balanced text-amber-400"></i>
-            <span>餘額校正</span>
-          </button>
-          <button id="btnOpenShiftSyncHome" class="btn-press btn-secondary py-3 px-4 text-xs flex items-center justify-center gap-2">
-            <i class="fa-solid fa-sack-dollar text-emerald-400"></i>
-            <span>領現 / 預算設定</span>
+            <span>玉山可用餘額校正</span>
           </button>
         </div>
       </div>
-    </section>
 
-    <!-- ==================== 分頁 2：【扣款與存款紀錄 / 冷卻清單】 ==================== -->
-    <section id="tab-records" class="tab-pane hidden space-y-6">
-      <!-- Apple Segmented Control -->
-      <div class="bg-[#151821] p-1.5 rounded-2xl border border-white/[0.08] grid grid-cols-2 gap-1.5">
-        <button type="button" data-record-subtab="transactions" class="record-subtab-btn btn-press py-2.5 rounded-xl text-xs font-semibold bg-[#252A38] text-[#F5F5F7] shadow-sm">
-          🧾 扣款與存款紀錄
-        </button>
-        <button type="button" data-record-subtab="cooldown" class="record-subtab-btn btn-press py-2.5 rounded-xl text-xs font-medium text-[#8E95A5]">
-          🔥 72h 冷卻清單
-        </button>
-      </div>
-
-      <!-- 子分頁：72h 冷卻清單 -->
-      <div id="subtab-cooldown" class="hidden space-y-4">
-        <div class="flex items-center justify-between px-1">
-          <span id="achieveBadgeTitle" class="text-xs font-medium text-emerald-300 bg-emerald-500/12 px-3 py-1.5 rounded-full border border-emerald-500/25">🌱 防衝動覺醒者</span>
-          <button id="btnOpenImpulseFromList" class="btn-press btn-primary px-4 py-2 rounded-full text-xs flex items-center gap-1.5">
-            <i class="fa-solid fa-plus"></i>
-            <span>新增想買</span>
-          </button>
-        </div>
-        <div id="cooldownListContainer" class="space-y-4"></div>
-      </div>
-
-      <!-- 子分頁：扣款與存款紀錄 -->
-      <div id="subtab-transactions" class="space-y-4">
-        <div class="bento-card p-6 grid grid-cols-3 divide-x divide-white/[0.07] text-center">
-          <div class="px-2 space-y-1">
-            <div class="text-xs text-[#8E95A5]">金融卡存款</div>
-            <div id="txSummaryDeposited" class="text-base font-bold text-emerald-400 tabular-nums">+$0</div>
-          </div>
-          <div class="px-2 space-y-1">
-            <div class="text-xs text-[#8E95A5]">刷卡扣款</div>
-            <div id="txSummaryCardSpent" class="text-base font-bold text-rose-400 tabular-nums">-$0</div>
-          </div>
-          <div class="px-2 space-y-1">
-            <div class="text-xs text-[#8E95A5]">現金消費</div>
-            <div id="txSummaryCashSpent" class="text-base font-bold text-sky-400 tabular-nums">-$0</div>
-          </div>
-        </div>
-
+      <!-- 3. 交易篩選列與交易清單 -->
+      <div class="space-y-4">
         <div class="flex items-center justify-between gap-3">
           <div class="flex overflow-x-auto no-scrollbar gap-2 py-1" id="txFilterBar">
             <button data-tx-filter="ALL" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-semibold bg-[#0A84FF] text-white">全部</button>
@@ -415,7 +478,68 @@
       </div>
     </section>
 
-    <!-- ==================== 分頁 3：【設定與分析】 (Apple Settings 風格) ==================== -->
+    <!-- ==================== 分頁 4：【自律防剁】 ==================== -->
+    <section id="tab-impulse" class="tab-pane hidden space-y-6">
+
+      <!-- 1. 防剁手急救大卡片 -->
+      <button id="btnOpenImpulseModal" class="w-full bento-card p-6 btn-press flex items-center justify-between gap-4 border-[#0A84FF]/30 bg-gradient-to-r from-[#151821] to-[#172236]">
+        <div class="flex items-center gap-4">
+          <div class="w-12 h-12 rounded-2xl bg-[#0A84FF] text-white grid place-items-center text-lg shrink-0 shadow-md shadow-[#0A84FF]/25">
+            <i class="fa-solid fa-fire-extinguisher"></i>
+          </div>
+          <div class="text-left space-y-1">
+            <div class="text-base font-semibold text-[#F5F5F7] tracking-tight">➕ 我又想買東西了</div>
+            <div class="text-xs text-[#8E95A5]">啟動血汗工時換算 · 72 小時冷卻鎖</div>
+          </div>
+        </div>
+        <div class="w-8 h-8 rounded-full bg-white/[0.08] grid place-items-center text-xs text-[#D1D5DB] shrink-0">
+          <i class="fa-solid fa-chevron-right"></i>
+        </div>
+      </button>
+
+      <!-- 2. 忍住省下戰績面板 -->
+      <div class="bento-card p-6 sm:p-7 space-y-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-[#8E95A5] flex items-center gap-2">
+            <i class="fa-solid fa-trophy text-amber-400"></i>
+            <span>防剁自律成果</span>
+          </span>
+          <span id="achieveBadgeTitle" class="text-xs font-medium text-emerald-300 bg-emerald-500/12 px-3 py-1.5 rounded-full border border-emerald-500/25">🌱 防衝動覺醒者</span>
+        </div>
+
+        <div class="grid grid-cols-3 divide-x divide-white/[0.07] text-center apple-inset !p-4">
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">已省下總額</div>
+            <div id="savedTotalVal" class="text-lg sm:text-xl font-bold text-emerald-400 tabular-nums">$0</div>
+          </div>
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">少站血汗工時</div>
+            <div class="text-lg sm:text-xl font-bold text-[#F5F5F7] tabular-nums"><span id="savedHoursVal">0</span>h</div>
+          </div>
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">成功忍住件數</div>
+            <div class="text-lg sm:text-xl font-bold text-[#F5F5F7] tabular-nums"><span id="savedCountVal">0</span> 件</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 72h 冷卻中物品清單 -->
+      <div class="space-y-4">
+        <div class="flex items-center justify-between px-1">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+            <h3 class="text-sm font-semibold text-[#F5F5F7]">🔥 72 小時冷卻清單</h3>
+          </div>
+          <button id="btnOpenImpulseFromList" class="btn-press btn-primary px-4 py-2 rounded-full text-xs flex items-center gap-1.5">
+            <i class="fa-solid fa-plus"></i>
+            <span>新增想買</span>
+          </button>
+        </div>
+        <div id="cooldownListContainer" class="space-y-4"></div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 5：【設定與分析】 (Apple Settings 風格) ==================== -->
     <section id="tab-analytics" class="tab-pane hidden space-y-6">
 
       <!-- 1. 金融卡存款預算 ＆ 領現核對 -->
@@ -571,20 +695,28 @@
     </section>
   </main>
 
-  <!-- ==================== 底部導覽列 (Apple Frosted Glass Tab Bar) ==================== -->
-  <nav class="fixed bottom-0 inset-x-0 z-40 bg-[#12151E]/85 backdrop-blur-2xl border-t border-white/[0.08]">
-    <div class="max-w-2xl mx-auto px-6 py-2 grid grid-cols-3 gap-3">
-      <button type="button" data-nav-tab="home" class="nav-tab-btn btn-press py-2 rounded-xl flex flex-col items-center gap-1 text-[#0A84FF] font-semibold">
-        <i class="fa-solid fa-house text-base"></i>
-        <span class="text-xs">首頁總覽</span>
+  <!-- ==================== 底部導覽列 (Apple Frosted Glass 5-Tab Bar) ==================== -->
+  <nav class="fixed bottom-0 inset-x-0 z-40 bg-[#12151E]/90 backdrop-blur-2xl border-t border-white/[0.08]">
+    <div class="max-w-2xl mx-auto px-2 py-1.5 grid grid-cols-5 gap-1">
+      <button type="button" data-nav-tab="home" class="nav-tab-btn btn-press py-1.5 rounded-xl flex flex-col items-center gap-1 text-[#0A84FF] font-semibold">
+        <i class="fa-solid fa-house text-sm sm:text-base"></i>
+        <span class="text-[11px]">首頁</span>
       </button>
-      <button type="button" data-nav-tab="records" class="nav-tab-btn btn-press py-2 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
-        <i class="fa-solid fa-hourglass-half text-base"></i>
-        <span class="text-xs">冷卻與紀錄</span>
+      <button type="button" data-nav-tab="wallet" class="nav-tab-btn btn-press py-1.5 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
+        <i class="fa-solid fa-wallet text-sm sm:text-base"></i>
+        <span class="text-[11px]">錢包</span>
       </button>
-      <button type="button" data-nav-tab="analytics" class="nav-tab-btn btn-press py-2 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
-        <i class="fa-solid fa-sliders text-base"></i>
-        <span class="text-xs">設定與分析</span>
+      <button type="button" data-nav-tab="records" class="nav-tab-btn btn-press py-1.5 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
+        <i class="fa-solid fa-receipt text-sm sm:text-base"></i>
+        <span class="text-[11px]">明細</span>
+      </button>
+      <button type="button" data-nav-tab="impulse" class="nav-tab-btn btn-press py-1.5 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
+        <i class="fa-solid fa-shield-heart text-sm sm:text-base"></i>
+        <span class="text-[11px]">防剁</span>
+      </button>
+      <button type="button" data-nav-tab="analytics" class="nav-tab-btn btn-press py-1.5 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
+        <i class="fa-solid fa-sliders text-sm sm:text-base"></i>
+        <span class="text-[11px]">設定</span>
       </button>
     </div>
   </nav>
@@ -954,7 +1086,7 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261022v15"></script>
-  <script src="/js/app.js?v=20261022v15"></script>
+  <script src="/js/browserEngine.js?v=20261022v16"></script>
+  <script src="/js/app.js?v=20261022v16"></script>
 </body>
 </html>
