@@ -89,7 +89,6 @@ async function handleCloudflareApiRequest(request, env) {
     }
     edgeInitialized = true;
   } else if (!edgeInitialized) {
-    ensureDemoTransactionsIfEmpty(edgeDb);
     edgeInitialized = true;
     await saveD1Snapshot(d1, edgeDb.exportSnapshot());
   }

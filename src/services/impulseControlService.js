@@ -232,7 +232,7 @@ function getVampireAndSubscriptionRadar(db, referenceDateStr) {
   const fixedList = db.prepare('SELECT * FROM fixed_expenses WHERE is_active = 1 ORDER BY billing_day ASC').all();
   const currentDay = Number(refDate.slice(8, 10));
   const metrics = getSurvivalDashboardMetrics(db, refDate);
-  const estNetPay = Math.max(1, metrics.cycle.estimatedNetPay || 19000);
+  const estNetPay = Math.max(0, Number(metrics.budget.effectiveIncome) || Number(metrics.cycle.estimatedNetPay) || 0);
 
   const subscriptionAlerts = [];
   for (const exp of fixedList) {
@@ -260,7 +260,9 @@ function getVampireAndSubscriptionRadar(db, referenceDateStr) {
       }
     }
     const lockedTotal = installmentAmt + fixedSubAmt;
-    const preemptedPercent = Number(((lockedTotal / estNetPay) * 100).toFixed(1));
+    const preemptedPercent = estNetPay > 0
+      ? Number(((lockedTotal / estNetPay) * 100).toFixed(1))
+      : (lockedTotal > 0 ? 100 : 0);
     return {
       monthOffset: offset, yearMonth: ym, estimatedNetSalary: estNetPay,
       installmentAmount: installmentAmt, fixedAndSubAmount: fixedSubAmt,

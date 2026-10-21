@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   labor_health_deduction INTEGER NOT NULL DEFAULT 0,
   default_hourly_wage INTEGER NOT NULL DEFAULT 200,
   shift_app_path TEXT NOT NULL DEFAULT 'C:\Users\mrhai\.gemini\antigravity\scratch\shift-pay-app',
-  last_known_bank_balance INTEGER NOT NULL DEFAULT 18500,
+  last_known_bank_balance INTEGER NOT NULL DEFAULT 0,
   force_high_risk_mode INTEGER NOT NULL DEFAULT 0,
   llm_api_key TEXT NOT NULL DEFAULT '',
   gmail_user TEXT NOT NULL DEFAULT '',
@@ -125,8 +125,8 @@ CREATE TABLE IF NOT EXISTS fixed_expenses (
 
 CREATE TABLE IF NOT EXISTS wallet_tank (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  easycard_balance INTEGER NOT NULL DEFAULT 350,
-  cash_balance INTEGER NOT NULL DEFAULT 500,
+  easycard_balance INTEGER NOT NULL DEFAULT 0,
+  cash_balance INTEGER NOT NULL DEFAULT 0,
   last_audit_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

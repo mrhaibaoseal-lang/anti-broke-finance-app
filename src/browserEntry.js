@@ -3,7 +3,7 @@
 const { createDatabase } = require('./db/database');
 const { ensureDemoTransactionsIfEmpty, handleApiRequest } = require('./routes/api');
 
-const STORAGE_KEY = 'anti_broke_cloud_snapshot_v1';
+const STORAGE_KEY = 'anti_broke_cloud_snapshot_v2_clean';
 let browserDb = null;
 
 function getBrowserDb(clientSnapshot = null) {
@@ -15,10 +15,7 @@ function getBrowserDb(clientSnapshot = null) {
         if (raw) saved = JSON.parse(raw);
       } catch (_) {}
     }
-    browserDb = createDatabase({ engine: 'portable', seedDefaults: true, snapshot: saved || null });
-    if (!saved) {
-      ensureDemoTransactionsIfEmpty(browserDb);
-    }
+    browserDb = createDatabase({ engine: 'portable', seedDefaults: false, snapshot: saved || null });
   } else if (clientSnapshot && Number(clientSnapshot.version) > Number(browserDb.version)) {
     browserDb.importSnapshot(clientSnapshot);
   }

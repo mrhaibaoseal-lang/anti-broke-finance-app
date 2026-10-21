@@ -150,17 +150,21 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     return { status: 200, data: { ok: true, imap: imapRes, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 3. 唯讀跨專案班表同步 (支援自動掃描外部目錄或貼上 shiftpay-v2 JSON)
+  // 3. 薪資設定與唯讀跨專案班表同步 (支援直接輸入實領薪資/總薪資/時薪，或貼上 shiftpay-v2 JSON)
   if (method === 'POST' && pathname === '/api/shift/sync') {
     const cycle = syncCycleWithShiftData(db, {
       rawJsonPayload: body.rawJsonPayload || null,
+      manualNetSalary: body.manualNetSalary,
+      manualGrossPay: body.manualGrossPay,
+      manualHourlyWage: body.manualHourlyWage,
       referenceDateStr: body.referenceDate || null
     });
+    const effective = cycle.is_salary_settled && cycle.actual_salary !== null ? cycle.actual_salary : cycle.estimated_net_pay;
     return {
       status: 200,
       data: {
         ok: true,
-        message: `✅ 已成功同步班表薪資！預估總薪資 $${cycle.shift_gross_pay.toLocaleString()} ➔ 保守實領 $${cycle.estimated_net_pay.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
+        message: `✅ 已更新本月薪資設定！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
         cycle,
         dashboard: buildFullDashboardSnapshot(db)
       }
@@ -275,11 +279,11 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
       WHERE id = 1
     `).run(paydayDay, netPayFactor, laborHealthDeduction, shiftAppPath, forceHighRiskMode, gmailUser, gmailPass, nowIso);
 
-    syncCycleWithShiftData(db);
+    syncCycleWithShiftData(db, { recalculateOnly: true });
     return { status: 200, data: { ok: true, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 12. 展示資料重置 / 清空帳本
+  // 12. 展示資料重置 / 清空帳本（完全歸零）
   if (method === 'POST' && pathname === '/api/demo/reset') {
     db.exec(`
       DELETE FROM split_bills;
@@ -289,8 +293,13 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
       DELETE FROM wallet_tank_logs;
       DELETE FROM balance_sync_logs;
       DELETE FROM income_cycles;
+      DELETE FROM fixed_expenses;
     `);
-    if (body.withDemoData !== false) {
+    const nowIso = new Date().toISOString();
+    db.prepare('UPDATE wallet_tank SET easycard_balance = 0, cash_balance = 0, last_audit_at = ?, updated_at = ? WHERE id = 1').run(nowIso, nowIso);
+    db.prepare('UPDATE user_settings SET last_known_bank_balance = 0, updated_at = ? WHERE id = 1').run(nowIso);
+
+    if (body.withDemoData === true) {
       ensureDemoTransactionsIfEmpty(db);
     }
     return { status: 200, data: { ok: true, dashboard: buildFullDashboardSnapshot(db) } };

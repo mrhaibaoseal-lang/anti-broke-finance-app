@@ -30,8 +30,8 @@
       </div>
 
       <div class="flex items-center flex-wrap gap-2">
-        <button id="btnOpenShiftSync" class="btn-press px-3 py-2 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/30 text-indigo-200 text-xs font-bold flex items-center gap-1.5">
-          <i class="fa-solid fa-rotate"></i> 班表薪資同步
+        <button id="btnOpenShiftSync" class="btn-press px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 text-xs font-bold flex items-center gap-1.5">
+          <i class="fa-solid fa-sack-dollar"></i> 設定薪資 / 班表同步
         </button>
         <button id="btnOpenBalanceSync" class="btn-press px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 text-xs font-bold flex items-center gap-1.5">
           <i class="fa-solid fa-scale-balanced"></i> 玉山可用餘額一鍵校正
@@ -446,20 +446,35 @@
     </section>
   </main>
 
-  <!-- 彈窗 1：班表薪資唯讀同步 Modal -->
+  <!-- 彈窗 1：設定薪資 & 班表唯讀同步 Modal -->
   <div id="modalShiftSync" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm grid place-items-center p-4">
-    <div class="glass-card max-w-lg w-full p-5 space-y-4 border border-indigo-400/40">
+    <div class="glass-card max-w-lg w-full p-5 space-y-4 border border-emerald-400/40">
       <div class="flex items-center justify-between">
-        <h3 class="text-base font-bold text-white">⚡ 唯讀跨專案「班表算錢程式」薪資同步</h3>
+        <h3 class="text-base font-bold text-white">💰 設定目前薪資 / 班表薪資同步</h3>
         <button data-close-modal="modalShiftSync" class="w-8 h-8 rounded-full bg-white/10 text-white">✕</button>
       </div>
-      <p class="text-xs text-white/60 leading-relaxed">
-        方式 A：直接掃描本機路徑 <code class="text-indigo-300">C:\Users\mrhai\.gemini\antigravity\scratch\shift-pay-app</code>。<br/>
-        方式 B：在您的班表 App 點「一鍵複製目前班表 JSON 數據」或匯出備份 JSON，貼在下方直接連動！
-      </p>
-      <textarea id="shiftJsonInput" rows="4" class="input-dark w-full font-mono text-xs" placeholder="（選填）在此貼上從打工薪水帳 V2 複製的 JSON 數據... 若留空則自動掃描本機班表資料夾"></textarea>
+
+      <div class="space-y-3 bg-white/5 p-3.5 rounded-xl border border-white/10">
+        <div class="text-xs font-bold text-emerald-300">方式 1：直接輸入您目前的薪資與時薪（推薦）</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+          <div>
+            <label class="text-white/60 block mb-1">本月實領薪資 / 可用總預算 ($)</label>
+            <input id="manualNetSalaryInput" type="number" min="0" class="input-dark w-full font-bold text-emerald-300" placeholder="例如：25000" />
+          </div>
+          <div>
+            <label class="text-white/60 block mb-1">目前時薪 ($/hr，換算工時用)</label>
+            <input id="manualHourlyWageInput" type="number" min="1" class="input-dark w-full font-bold text-white" placeholder="例如：200" value="200" />
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div class="text-xs font-bold text-indigo-300">方式 2：貼上「班表算錢程式」JSON 數據自動換算（選填）</div>
+        <textarea id="shiftJsonInput" rows="3" class="input-dark w-full font-mono text-xs" placeholder="（選填）若未填上方實領薪資，可在此貼上從打工薪水帳 V2 複製的 JSON 數據..."></textarea>
+      </div>
+
       <div class="flex gap-2">
-        <button id="btnConfirmShiftSync" class="btn-press flex-1 py-3 rounded-xl bg-indigo-500 text-white font-extrabold text-sm">立即唯讀同步薪資與時薪</button>
+        <button id="btnConfirmShiftSync" class="btn-press flex-1 py-3 rounded-xl bg-emerald-500 text-black font-extrabold text-sm">💾 儲存薪資設定並更新安全額度</button>
       </div>
     </div>
   </div>

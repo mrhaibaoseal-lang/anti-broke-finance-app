@@ -247,6 +247,11 @@ test('7. 日常真實生活補丁：聚餐一鍵拆帳代墊池、悠遊卡自�
   assert.equal(tankAfter, tankBefore + 500);
 
   // (C) 一鍵餘額校正：若玉山真實餘額比系統推算少了 $350 -> 自動生成「$350 未知漏帳（待查黑洞）」立即扣減安全額度
+  processBankNotification(
+    db,
+    '【玉山銀行】薪資入帳通知：您的玉山帳戶於 2026/10/10 收到薪資轉帳入帳 NT$20,000 元。',
+    { timestamp: '2026-10-10T09:00:00.000Z', referenceDate: '2026-10-21' }
+  );
   metrics = getSurvivalDashboardMetrics(db, '2026-10-21');
   const expectedBal = metrics.budget.remainingBudget;
   const syncRes = syncEsunAvailableBalance(db, {

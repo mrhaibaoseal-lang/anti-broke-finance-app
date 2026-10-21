@@ -5,32 +5,10 @@
     "hourlyWage": 200,
     "otMultiplier": 1.34,
     "roundingMode": "monthly",
-    "attendanceBonus": 500,
-    "myName": "王凱弘"
+    "attendanceBonus": 0,
+    "myName": "使用者"
   },
-  "stamps": [
-    { "id": "s1", "name": "早班", "start": "09:00", "end": "17:00", "breakMin": 60, "color": "#0A84FF" },
-    { "id": "s2", "name": "晚班", "start": "18:00", "end": "22:00", "breakMin": 0, "color": "#BF5AF2" },
-    { "id": "s3", "name": "假日班", "start": "10:00", "end": "19:00", "breakMin": 60, "color": "#FF9F0A" }
-  ],
-  "shifts": {
-    "2026-10-01": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 30, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-03": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-04": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 45, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-06": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-08": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-10": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 60, "status": "normal", "leaveType": "late", "note": "國慶連假" },
-    "2026-10-11": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-13": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-15": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 30, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-17": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-18": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-20": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-22": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-24": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-25": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-27": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-29": { "name": "晚班", "color": "#BF5AF2", "start": "18:00", "end": "22:00", "breakMin": 0, "stampId": "s2", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" },
-    "2026-10-31": { "name": "假日班", "color": "#FF9F0A", "start": "10:00", "end": "19:00", "breakMin": 60, "stampId": "s3", "otMin": 0, "status": "normal", "leaveType": "late", "note": "" }
-  }
+  "stamps": [],
+  "shifts": {}
 }
+

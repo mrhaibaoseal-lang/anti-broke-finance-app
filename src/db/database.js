@@ -55,7 +55,7 @@ function createDatabase(options = {}) {
 
   const nowIso = new Date().toISOString();
 
-  // 確保 user_settings (id = 1) 永遠存在
+  // 確保 user_settings (id = 1) 永遠存在（初始金額歸零）
   const existingSettings = db.prepare('SELECT id FROM user_settings WHERE id = 1').get();
   if (!existingSettings) {
     db.prepare(`
@@ -65,35 +65,19 @@ function createDatabase(options = {}) {
         force_high_risk_mode, llm_api_key, gmail_user, gmail_app_password, updated_at
       ) VALUES (
         1, 10, 0.95, 0,
-        200, 'C:\\Users\\mrhai\\.gemini\\antigravity\\scratch\\shift-pay-app', 18500,
+        200, 'C:\\Users\\mrhai\\.gemini\\antigravity\\scratch\\shift-pay-app', 0,
         0, '', '', '', ?
       )
     `).run(nowIso);
   }
 
-  // 確保 wallet_tank (id = 1) 永遠存在
+  // 確保 wallet_tank (id = 1) 永遠存在（初始悠遊卡與現金水庫歸零）
   const existingTank = db.prepare('SELECT id FROM wallet_tank WHERE id = 1').get();
   if (!existingTank) {
-    const fourDaysAgo = new Date(Date.now() - 4 * 86400 * 1000).toISOString();
     db.prepare(`
       INSERT INTO wallet_tank (id, easycard_balance, cash_balance, last_audit_at, updated_at)
-      VALUES (1, 350, 500, ?, ?)
-    `).run(fourDaysAgo, nowIso);
-  }
-
-  // 若啟用預設種子資料且 fixed_expenses 為空，寫入常見的訂閱與分期範例
-  if (seedDefaults && !options.snapshot) {
-    const expCount = db.prepare('SELECT COUNT(*) AS cnt FROM fixed_expenses').get().cnt;
-    if (expCount === 0) {
-      const insertExp = db.prepare(`
-        INSERT INTO fixed_expenses (name, expense_type, monthly_amount, billing_day, total_installments, remaining_installments, note, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-      `);
-      insertExp.run('手機電信月租費', 'FIXED', 599, 15, null, null, '每月固定電信帳單', nowIso);
-      insertExp.run('Netflix 串流訂閱', 'SUBSCRIPTION', 390, 23, null, null, '扣款前 3 天提醒評估是否取消', nowIso);
-      insertExp.run('Spotify 個人方案', 'SUBSCRIPTION', 168, 24, null, null, '音樂訂閱服務', nowIso);
-      insertExp.run('iPad Air 分期付款', 'INSTALLMENT', 1800, 12, 12, 5, '12期0利率，剩餘5期壓在未來薪水條', nowIso);
-    }
+      VALUES (1, 0, 0, ?, ?)
+    `).run(nowIso, nowIso);
   }
 
   return db;

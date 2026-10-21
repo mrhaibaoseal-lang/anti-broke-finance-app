@@ -50,7 +50,10 @@ const NOTIFICATION_PRESETS = {
   }
 };
 
-const SNAPSHOT_STORAGE_KEY = 'anti_broke_cloud_snapshot_v1';
+const SNAPSHOT_STORAGE_KEY = 'anti_broke_cloud_snapshot_v2_clean';
+try {
+  localStorage.removeItem('anti_broke_cloud_snapshot_v1');
+} catch (_) {}
 
 function loadLocalSnapshot() {
   try {
@@ -645,18 +648,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderDashboard(res.dashboard);
   });
 
-  $('#btnOpenShiftSync').addEventListener('click', () => $('#modalShiftSync').classList.remove('hidden'));
+  $('#btnOpenShiftSync').addEventListener('click', () => {
+    if (dashboardState?.survival?.budget?.effectiveIncome > 0) {
+      $('#manualNetSalaryInput').value = dashboardState.survival.budget.effectiveIncome;
+    }
+    if (dashboardState?.survival?.cycle?.hourlyWage) {
+      $('#manualHourlyWageInput').value = dashboardState.survival.cycle.hourlyWage;
+    }
+    $('#modalShiftSync').classList.remove('hidden');
+  });
   $('#btnOpenBalanceSync').addEventListener('click', () => $('#modalBalanceSync').classList.remove('hidden'));
 
   $('#btnConfirmShiftSync').addEventListener('click', async () => {
+    const manualNetSalary = $('#manualNetSalaryInput').value.trim();
+    const manualHourlyWage = $('#manualHourlyWageInput').value.trim();
     const raw = $('#shiftJsonInput').value.trim();
     try {
-      const res = await apiCall('/api/shift/sync', 'POST', { rawJsonPayload: raw || null });
+      const res = await apiCall('/api/shift/sync', 'POST', {
+        manualNetSalary: manualNetSalary !== '' ? Number(manualNetSalary) : null,
+        manualHourlyWage: manualHourlyWage !== '' ? Number(manualHourlyWage) : null,
+        rawJsonPayload: raw || null
+      });
       $('#modalShiftSync').classList.add('hidden');
       alert(res.message);
       renderDashboard(res.dashboard);
     } catch (err) {
-      alert('班表同步失敗：' + err.message);
+      alert('薪資設定失敗：' + err.message);
     }
   });
 

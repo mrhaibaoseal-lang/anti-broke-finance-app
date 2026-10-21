@@ -4,7 +4,7 @@ const TABLE_DEFAULTS = {
   user_settings: () => ({
     id: 1, payday_day: 10, net_pay_factor: 0.95, labor_health_deduction: 0,
     default_hourly_wage: 200, shift_app_path: 'C:\\Users\\mrhai\\.gemini\\antigravity\\scratch\\shift-pay-app',
-    last_known_bank_balance: 18500, force_high_risk_mode: 0, llm_api_key: '',
+    last_known_bank_balance: 0, force_high_risk_mode: 0, llm_api_key: '',
     gmail_user: '', gmail_app_password: '', updated_at: ''
   }),
   income_cycles: () => ({
@@ -40,7 +40,7 @@ const TABLE_DEFAULTS = {
     total_installments: null, remaining_installments: null, note: '', is_active: 1, created_at: ''
   }),
   wallet_tank: () => ({
-    id: 1, easycard_balance: 350, cash_balance: 500, last_audit_at: '', updated_at: ''
+    id: 1, easycard_balance: 0, cash_balance: 0, last_audit_at: '', updated_at: ''
   }),
   wallet_tank_logs: () => ({
     id: null, tank_type: 'CASH', delta_amount: 0, balance_after: 0,

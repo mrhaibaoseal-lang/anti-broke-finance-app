@@ -7,7 +7,7 @@ const TABLE_DEFAULTS = {
   user_settings: () => ({
     id: 1, payday_day: 10, net_pay_factor: 0.95, labor_health_deduction: 0,
     default_hourly_wage: 200, shift_app_path: 'C:\\Users\\mrhai\\.gemini\\antigravity\\scratch\\shift-pay-app',
-    last_known_bank_balance: 18500, force_high_risk_mode: 0, llm_api_key: '',
+    last_known_bank_balance: 0, force_high_risk_mode: 0, llm_api_key: '',
     gmail_user: '', gmail_app_password: '', updated_at: ''
   }),
   income_cycles: () => ({
@@ -43,7 +43,7 @@ const TABLE_DEFAULTS = {
     total_installments: null, remaining_installments: null, note: '', is_active: 1, created_at: ''
   }),
   wallet_tank: () => ({
-    id: 1, easycard_balance: 350, cash_balance: 500, last_audit_at: '', updated_at: ''
+    id: 1, easycard_balance: 0, cash_balance: 0, last_audit_at: '', updated_at: ''
   }),
   wallet_tank_logs: () => ({
     id: null, tank_type: 'CASH', delta_amount: 0, balance_after: 0,
@@ -474,7 +474,7 @@ function createDatabase(options = {}) {
 
   const nowIso = new Date().toISOString();
 
-  // 確保 user_settings (id = 1) 永遠存在
+  // 確保 user_settings (id = 1) 永遠存在（初始金額歸零）
   const existingSettings = db.prepare('SELECT id FROM user_settings WHERE id = 1').get();
   if (!existingSettings) {
     db.prepare(`
@@ -484,35 +484,19 @@ function createDatabase(options = {}) {
         force_high_risk_mode, llm_api_key, gmail_user, gmail_app_password, updated_at
       ) VALUES (
         1, 10, 0.95, 0,
-        200, 'C:\\Users\\mrhai\\.gemini\\antigravity\\scratch\\shift-pay-app', 18500,
+        200, 'C:\\Users\\mrhai\\.gemini\\antigravity\\scratch\\shift-pay-app', 0,
         0, '', '', '', ?
       )
     `).run(nowIso);
   }
 
-  // 確保 wallet_tank (id = 1) 永遠存在
+  // 確保 wallet_tank (id = 1) 永遠存在（初始悠遊卡與現金水庫歸零）
   const existingTank = db.prepare('SELECT id FROM wallet_tank WHERE id = 1').get();
   if (!existingTank) {
-    const fourDaysAgo = new Date(Date.now() - 4 * 86400 * 1000).toISOString();
     db.prepare(`
       INSERT INTO wallet_tank (id, easycard_balance, cash_balance, last_audit_at, updated_at)
-      VALUES (1, 350, 500, ?, ?)
-    `).run(fourDaysAgo, nowIso);
-  }
-
-  // 若啟用預設種子資料且 fixed_expenses 為空，寫入常見的訂閱與分期範例
-  if (seedDefaults && !options.snapshot) {
-    const expCount = db.prepare('SELECT COUNT(*) AS cnt FROM fixed_expenses').get().cnt;
-    if (expCount === 0) {
-      const insertExp = db.prepare(`
-        INSERT INTO fixed_expenses (name, expense_type, monthly_amount, billing_day, total_installments, remaining_installments, note, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-      `);
-      insertExp.run('手機電信月租費', 'FIXED', 599, 15, null, null, '每月固定電信帳單', nowIso);
-      insertExp.run('Netflix 串流訂閱', 'SUBSCRIPTION', 390, 23, null, null, '扣款前 3 天提醒評估是否取消', nowIso);
-      insertExp.run('Spotify 個人方案', 'SUBSCRIPTION', 168, 24, null, null, '音樂訂閱服務', nowIso);
-      insertExp.run('iPad Air 分期付款', 'INSTALLMENT', 1800, 12, 12, 5, '12期0利率，剩餘5期壓在未來薪水條', nowIso);
-    }
+      VALUES (1, 0, 0, ?, ?)
+    `).run(nowIso, nowIso);
   }
 
   return db;
@@ -559,34 +543,11 @@ const DEFAULT_SAMPLE_SHIFT_DATA = {
     hourlyWage: 200,
     otMultiplier: 1.34,
     roundingMode: 'monthly',
-    attendanceBonus: 500,
-    myName: '王凱弘'
+    attendanceBonus: 0,
+    myName: '使用者'
   },
-  stamps: [
-    { id: 's1', name: '早班', start: '09:00', end: '17:00', breakMin: 60, color: '#0A84FF' },
-    { id: 's2', name: '晚班', start: '18:00', end: '22:00', breakMin: 0, color: '#BF5AF2' },
-    { id: 's3', name: '假日班', start: '10:00', end: '19:00', breakMin: 60, color: '#FF9F0A' }
-  ],
-  shifts: {
-    '2026-10-01': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 30, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-03': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-04': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 45, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-06': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-08': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-10': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 60, status: 'normal', leaveType: 'late', note: '國慶連假' },
-    '2026-10-11': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-13': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-15': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 30, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-17': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-18': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-20': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-22': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-24': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-25': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-27': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-29': { name: '晚班', color: '#BF5AF2', start: '18:00', end: '22:00', breakMin: 0, stampId: 's2', otMin: 0, status: 'normal', leaveType: 'late', note: '' },
-    '2026-10-31': { name: '假日班', color: '#FF9F0A', start: '10:00', end: '19:00', breakMin: 60, stampId: 's3', otMin: 0, status: 'normal', leaveType: 'late', note: '' }
-  }
+  stamps: [],
+  shifts: {}
 };
 
 function toMin(t) {
@@ -793,13 +754,8 @@ function ensureCurrentCycle(db, referenceDateStr) {
 
   let cycle = db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(range.cycleKey);
   if (!cycle) {
-    const synced = readExternalShiftDirectory(settings.shift_app_path, range.targetShiftMonth);
-    const estNetPay = calculateEstimatedNetPay(
-      synced.totalPay,
-      settings.net_pay_factor,
-      settings.labor_health_deduction
-    );
     const nowIso = new Date().toISOString();
+    const initialWage = Number(settings.default_hourly_wage) || 200;
 
     db.prepare(`
       INSERT INTO income_cycles (
@@ -807,36 +763,78 @@ function ensureCurrentCycle(db, referenceDateStr) {
         shift_gross_pay, normal_hours, ot_minutes, bonus_pay,
         hourly_wage, estimated_net_pay, actual_salary, is_salary_settled,
         shift_sync_source, raw_shift_payload, last_synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, 0, NULL, 0, 'init_clean', NULL, ?)
     `).run(
       range.cycleKey,
       range.startDate,
       range.endDate,
-      synced.month || range.targetShiftMonth,
-      synced.totalPay,
-      synced.normalHours,
-      synced.otMinutes,
-      synced.bonusPay,
-      synced.hourlyWage,
-      estNetPay,
-      synced.syncSource,
-      JSON.stringify(synced),
+      range.targetShiftMonth,
+      initialWage,
       nowIso
     );
 
-    if (synced.hourlyWage > 0) {
-      db.prepare('UPDATE user_settings SET default_hourly_wage = ?, updated_at = ? WHERE id = 1')
-        .run(synced.hourlyWage, nowIso);
-    }
     cycle = db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(range.cycleKey);
   }
   return cycle;
 }
 
-function syncCycleWithShiftData(db, { rawJsonPayload = null, referenceDateStr = null } = {}) {
+function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = null, manualGrossPay = null, manualHourlyWage = null, recalculateOnly = false, referenceDateStr = null } = {}) {
   const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get();
   const cycle = ensureCurrentCycle(db, referenceDateStr);
+  const nowIso = new Date().toISOString();
 
+  const wage = (manualHourlyWage !== null && manualHourlyWage !== undefined && Number(manualHourlyWage) > 0)
+    ? Math.round(Number(manualHourlyWage))
+    : (Number(cycle.hourly_wage) || Number(settings.default_hourly_wage) || 200);
+
+  if (wage > 0) {
+    db.prepare('UPDATE user_settings SET default_hourly_wage = ?, updated_at = ? WHERE id = 1').run(wage, nowIso);
+  }
+
+  // 模式 A：使用者直接輸入「本月實領薪資 / 可用預算」
+  if (manualNetSalary !== null && manualNetSalary !== undefined && String(manualNetSalary).trim() !== '') {
+    const netAmt = Math.max(0, Math.round(Number(manualNetSalary) || 0));
+    const grossAmt = (manualGrossPay !== null && manualGrossPay !== undefined && String(manualGrossPay).trim() !== '')
+      ? Math.max(0, Math.round(Number(manualGrossPay) || 0))
+      : netAmt;
+
+    db.prepare(`
+      UPDATE income_cycles
+      SET shift_gross_pay = ?, hourly_wage = ?, estimated_net_pay = ?,
+          actual_salary = ?, is_salary_settled = 1, shift_sync_source = 'manual_salary', last_synced_at = ?
+      WHERE cycle_key = ?
+    `).run(grossAmt, wage, netAmt, netAmt, nowIso, cycle.cycle_key);
+
+    return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
+  }
+
+  // 模式 B：使用者輸入「預估班表總薪資 (Gross)」，由系統乘上折數與扣除勞健保
+  if (manualGrossPay !== null && manualGrossPay !== undefined && String(manualGrossPay).trim() !== '') {
+    const grossAmt = Math.max(0, Math.round(Number(manualGrossPay) || 0));
+    const estNet = calculateEstimatedNetPay(grossAmt, settings.net_pay_factor, settings.labor_health_deduction);
+
+    db.prepare(`
+      UPDATE income_cycles
+      SET shift_gross_pay = ?, hourly_wage = ?, estimated_net_pay = ?,
+          actual_salary = NULL, is_salary_settled = 0, shift_sync_source = 'manual_gross', last_synced_at = ?
+      WHERE cycle_key = ?
+    `).run(grossAmt, wage, estNet, nowIso, cycle.cycle_key);
+
+    return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
+  }
+
+  // 模式 C：僅變更設定（折數 / 勞健保 / 時薪）時重算現有週期，不洗掉既有薪資
+  if (recalculateOnly) {
+    const estNet = calculateEstimatedNetPay(cycle.shift_gross_pay, settings.net_pay_factor, settings.labor_health_deduction);
+    db.prepare(`
+      UPDATE income_cycles
+      SET hourly_wage = ?, estimated_net_pay = ?, last_synced_at = ?
+      WHERE cycle_key = ?
+    `).run(wage, estNet, nowIso, cycle.cycle_key);
+    return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
+  }
+
+  // 模式 D：從貼上的 shiftpay-v2 JSON 或外部目錄唯讀同步
   const synced = rawJsonPayload
     ? { ...parseShiftPayload(rawJsonPayload, cycle.target_shift_month), syncSource: 'clipboard_or_upload_json' }
     : readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
@@ -846,7 +844,6 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, referenceDateStr = 
     settings.net_pay_factor,
     settings.labor_health_deduction
   );
-  const nowIso = new Date().toISOString();
 
   db.prepare(`
     UPDATE income_cycles
@@ -856,7 +853,7 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, referenceDateStr = 
     WHERE cycle_key = ?
   `).run(
     synced.totalPay, synced.normalHours, synced.otMinutes, synced.bonusPay,
-    synced.hourlyWage, estNetPay, synced.syncSource,
+    synced.hourlyWage || wage, estNetPay, synced.syncSource,
     JSON.stringify(synced), nowIso, cycle.cycle_key
   );
 
@@ -934,13 +931,14 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
 
   let projectedBrokeDate = null, daysUntilBroke = null, overdraftDays = 0, bankruptcyWarningText = null;
   const effectiveBurnVelocity = Math.max(avgDailyBurnRate, todaySpent);
+  const isInitialZeroState = effectiveIncome === 0 && fixedAndInstallments === 0 && totalSpent === 0;
 
-  if (remainingBudget <= 0) {
+  if (!isInitialZeroState && remainingBudget <= 0) {
     daysUntilBroke = 0;
     projectedBrokeDate = refDate;
     overdraftDays = daysRemaining;
     bankruptcyWarningText = `🚨 緊急破產警報：可用安全預算已透支 $${Math.abs(remainingBudget)} 元！你已透支未來 ${daysRemaining} 天的餐費，接下來每天只能花 $0 元！`;
-  } else if (effectiveBurnVelocity > Math.max(1, dailySafeBudget)) {
+  } else if (!isInitialZeroState && effectiveBurnVelocity > Math.max(1, dailySafeBudget)) {
     daysUntilBroke = Math.max(1, Math.floor(remainingBudget / effectiveBurnVelocity));
     if (daysUntilBroke < daysRemaining) {
       const brokeDt = new Date(refMs + daysUntilBroke * 86400000);
@@ -952,6 +950,17 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
       bankruptcyWarningText = `⚠️ 破產倒數預警：按目前花費速度（日均 $${effectiveBurnVelocity}），將在【${projectedBrokeDate || '發薪日前'}】破產歸零！你已透支未來 ${overdraftDays} 天的餐費，接下來每天只能花 $${Math.max(0, dailySafeBudget)} 元！`;
     }
   }
+
+  const tier = isInitialZeroState
+    ? {
+        code: 'WEALTHY',
+        emoji: '✨',
+        label: '初始待設定狀態',
+        rangeText: '請輸入本月薪資',
+        themeColor: 'emerald',
+        advice: '帳本已歸零為初始狀態！請點選右上角「💰 設定薪資 / 班表同步」輸入您目前的薪資與時薪，並新增您的固定扣款與消費。'
+      }
+    : evaluateSurvivalTier(dailySafeBudget);
 
   return {
     referenceDate: refDate,
@@ -970,10 +979,10 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
       effectiveIncome, fixedAndInstallments, disposablePool, totalSpent,
       pendingSpent: Number(spentRow.pending_spent) || 0, settledSpent: Number(spentRow.settled_spent) || 0,
       gapSpent: Number(spentRow.gap_spent) || 0, todaySpent, remainingBudget, dailySafeBudget,
-      idealDailyBudget, avgDailyBurnRate, isTodayOverspent, overdraftDays,
+      idealDailyBudget, avgDailyBurnRate, isTodayOverspent: isInitialZeroState ? false : isTodayOverspent, overdraftDays,
       daysUntilBroke, projectedBrokeDate, bankruptcyWarningText
     },
-    tier: evaluateSurvivalTier(dailySafeBudget)
+    tier
   };
 }
 
@@ -1939,7 +1948,7 @@ function getVampireAndSubscriptionRadar(db, referenceDateStr) {
   const fixedList = db.prepare('SELECT * FROM fixed_expenses WHERE is_active = 1 ORDER BY billing_day ASC').all();
   const currentDay = Number(refDate.slice(8, 10));
   const metrics = getSurvivalDashboardMetrics(db, refDate);
-  const estNetPay = Math.max(1, metrics.cycle.estimatedNetPay || 19000);
+  const estNetPay = Math.max(0, Number(metrics.budget.effectiveIncome) || Number(metrics.cycle.estimatedNetPay) || 0);
 
   const subscriptionAlerts = [];
   for (const exp of fixedList) {
@@ -1967,7 +1976,9 @@ function getVampireAndSubscriptionRadar(db, referenceDateStr) {
       }
     }
     const lockedTotal = installmentAmt + fixedSubAmt;
-    const preemptedPercent = Number(((lockedTotal / estNetPay) * 100).toFixed(1));
+    const preemptedPercent = estNetPay > 0
+      ? Number(((lockedTotal / estNetPay) * 100).toFixed(1))
+      : (lockedTotal > 0 ? 100 : 0);
     return {
       monthOffset: offset, yearMonth: ym, estimatedNetSalary: estNetPay,
       installmentAmount: installmentAmt, fixedAndSubAmount: fixedSubAmt,
@@ -2496,17 +2507,21 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     return { status: 200, data: { ok: true, imap: imapRes, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 3. 唯讀跨專案班表同步 (支援自動掃描外部目錄或貼上 shiftpay-v2 JSON)
+  // 3. 薪資設定與唯讀跨專案班表同步 (支援直接輸入實領薪資/總薪資/時薪，或貼上 shiftpay-v2 JSON)
   if (method === 'POST' && pathname === '/api/shift/sync') {
     const cycle = syncCycleWithShiftData(db, {
       rawJsonPayload: body.rawJsonPayload || null,
+      manualNetSalary: body.manualNetSalary,
+      manualGrossPay: body.manualGrossPay,
+      manualHourlyWage: body.manualHourlyWage,
       referenceDateStr: body.referenceDate || null
     });
+    const effective = cycle.is_salary_settled && cycle.actual_salary !== null ? cycle.actual_salary : cycle.estimated_net_pay;
     return {
       status: 200,
       data: {
         ok: true,
-        message: `✅ 已成功同步班表薪資！預估總薪資 $${cycle.shift_gross_pay.toLocaleString()} ➔ 保守實領 $${cycle.estimated_net_pay.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
+        message: `✅ 已更新本月薪資設定！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
         cycle,
         dashboard: buildFullDashboardSnapshot(db)
       }
@@ -2621,11 +2636,11 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
       WHERE id = 1
     `).run(paydayDay, netPayFactor, laborHealthDeduction, shiftAppPath, forceHighRiskMode, gmailUser, gmailPass, nowIso);
 
-    syncCycleWithShiftData(db);
+    syncCycleWithShiftData(db, { recalculateOnly: true });
     return { status: 200, data: { ok: true, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 12. 展示資料重置 / 清空帳本
+  // 12. 展示資料重置 / 清空帳本（完全歸零）
   if (method === 'POST' && pathname === '/api/demo/reset') {
     db.exec(`
       DELETE FROM split_bills;
@@ -2635,8 +2650,13 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
       DELETE FROM wallet_tank_logs;
       DELETE FROM balance_sync_logs;
       DELETE FROM income_cycles;
+      DELETE FROM fixed_expenses;
     `);
-    if (body.withDemoData !== false) {
+    const nowIso = new Date().toISOString();
+    db.prepare('UPDATE wallet_tank SET easycard_balance = 0, cash_balance = 0, last_audit_at = ?, updated_at = ? WHERE id = 1').run(nowIso, nowIso);
+    db.prepare('UPDATE user_settings SET last_known_bank_balance = 0, updated_at = ? WHERE id = 1').run(nowIso);
+
+    if (body.withDemoData === true) {
       ensureDemoTransactionsIfEmpty(db);
     }
     return { status: 200, data: { ok: true, dashboard: buildFullDashboardSnapshot(db) } };
@@ -2660,7 +2680,7 @@ module.exports = {
 const { createDatabase } = require('./db/database');
 const { ensureDemoTransactionsIfEmpty, handleApiRequest } = require('./routes/api');
 
-const STORAGE_KEY = 'anti_broke_cloud_snapshot_v1';
+const STORAGE_KEY = 'anti_broke_cloud_snapshot_v2_clean';
 let browserDb = null;
 
 function getBrowserDb(clientSnapshot = null) {
@@ -2672,10 +2692,7 @@ function getBrowserDb(clientSnapshot = null) {
         if (raw) saved = JSON.parse(raw);
       } catch (_) {}
     }
-    browserDb = createDatabase({ engine: 'portable', seedDefaults: true, snapshot: saved || null });
-    if (!saved) {
-      ensureDemoTransactionsIfEmpty(browserDb);
-    }
+    browserDb = createDatabase({ engine: 'portable', seedDefaults: false, snapshot: saved || null });
   } else if (clientSnapshot && Number(clientSnapshot.version) > Number(browserDb.version)) {
     browserDb.importSnapshot(clientSnapshot);
   }

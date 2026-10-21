@@ -90,9 +90,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-if (require.main === module) {
-  const db = getDb();
-  ensureDemoTransactionsIfEmpty(db);
+  if (require.main === module) {
+  getDb();
   server.listen(PORT, () => {
     console.log(`====================================================================`);
     console.log(`🛡️ 防破產與防衝動消費之智慧記帳系統 (Anti-Broke Finance Tracker)`);
