@@ -11,7 +11,7 @@
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261021v6" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261021v7" />
 </head>
 <body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -495,38 +495,45 @@
         <button data-close-modal="modalNotifParser" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
       </div>
 
-      <div class="rounded-2xl bg-indigo-50/70 border border-indigo-200/80 p-3.5 space-y-3 text-xs">
+      <div class="rounded-2xl bg-indigo-50/70 border border-indigo-200/80 p-3.5 space-y-3.5 text-xs">
         <div class="flex items-center justify-between">
           <span class="font-bold text-indigo-950 flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            全自動偵測引擎運行中（每 15 秒即時同步）
+            三通道全開零死角（內建智慧防重 · 絕不重複扣款）
           </span>
-          <span class="px-2 py-0.5 rounded-full bg-white text-indigo-700 font-semibold text-[10px] border border-indigo-200">Apple Pay + 銀行防重</span>
+          <span class="px-2 py-0.5 rounded-full bg-white text-emerald-700 font-bold text-[10px] border border-emerald-200">推薦 3 個全開</span>
         </div>
 
-        <!-- 專屬 Apple Pay 感應刷卡秒級自動偵測卡片 (支援新版 iOS AI「描述捷徑」提示詞) -->
+        <div class="rounded-xl bg-white/90 px-3 py-2 text-[11px] text-slate-600 border border-indigo-100 leading-relaxed">
+          🛡️ <b>為什麼三個都可以同時打開？</b><br/>
+          • <b>方式 A</b> 負責抓「<b>Apple Pay 感應</b>」（刷卡當下 1 秒入帳）<br/>
+          • <b>方式 B + C</b> 負責抓「<b>實體卡插卡、LINE Pay、街口、網購刷卡</b>」與「<b>銀行事後請款</b>」<br/>
+          • 系統內建<b>跨管道防重複扣款鎖</b>：同一筆消費就算同時被 A、B、C 抓到，也<b>只會扣款 1 次</b>！
+        </div>
+
+        <!-- ==================== 方式 A：Apple Pay 感應刷卡 ==================== -->
         <div class="bg-slate-900 text-white rounded-2xl p-3.5 space-y-2.5 shadow-sm">
           <div class="flex items-center justify-between">
             <span class="font-bold text-sm flex items-center gap-1.5">
-              <i class="fa-brands fa-apple text-base"></i> 方式 A：Apple Pay 感應「1 秒全自動記帳」
+              <i class="fa-brands fa-apple text-base"></i> 方式 A：Apple Pay 感應（1 秒入帳）
             </span>
-            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">支援新版 iOS AI 捷徑</span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">適用 Apple Pay</span>
           </div>
 
-          <div class="rounded-xl bg-white/10 p-2.5 space-y-1.5 text-[11px] text-slate-200 leading-relaxed border border-white/10">
-            <div class="font-bold text-amber-300">💡 看到 iOS「你想要捷徑執行什麼動作？（描述捷徑）」畫面時：</div>
-            <div><b>方法 1（直接餵給 iOS AI）</b>：點下方<b>「✨ 複製 iOS 捷徑 AI 提示詞」</b>，直接貼進「描述捷徑」輸入框送出，AI 會自動幫你組裝好！</div>
-            <div><b>方法 2（關掉 AI 框回傳統模式）</b>：點畫面<b>右下角的「✕」</b>或<b>右上角的「編輯」</b>，即可直接搜尋「取得 URL 內容」！</div>
-            <div class="text-emerald-300 font-semibold pt-0.5">⚡ 記得從捷徑底部「自動化」➔「＋」➔「交易 (Transaction)」設為「立即執行」，感應刷卡才會自動觸發！</div>
+          <div class="rounded-xl bg-white/10 p-2.5 space-y-1 text-[11px] text-slate-200 leading-relaxed border border-white/10">
+            <div><b>步驟 1</b>：點下方黃綠按鈕複製 <b>AI 提示詞</b>。</div>
+            <div><b>步驟 2</b>：打開 iPhone「<b>捷徑</b>」➔ 點底部中間「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 往下滑選「<b>交易 (Transaction)</b>」。</div>
+            <div><b>步驟 3</b>：勾選你的卡片，選「<b>立即執行</b>」➔ 點「<b>新增空白自動化</b>」。</div>
+            <div><b>步驟 4</b>：在跳出的「<b>描述捷徑</b>」AI 框直接貼上提示詞送出即完成！（或點右下角 ✕ 搜尋「取得 URL 內容」貼上網址）</div>
           </div>
 
           <button type="button" id="btnCopyIosAiPrompt" class="btn-press w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> ✨ 一鍵複製「iOS 捷徑 AI 提示詞」（直接貼入描述捷徑）
+            <i class="fa-solid fa-wand-magic-sparkles"></i> ✨ 1. 一鍵複製「方式 A：Apple Pay」捷徑 AI 提示詞
           </button>
 
           <div class="grid grid-cols-2 gap-2">
             <button type="button" id="btnCopyApplePayUrl" class="btn-press py-2 px-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-semibold text-xs flex items-center justify-center gap-1">
-              <i class="fa-brands fa-apple"></i> 複製 Apple Pay 網址
+              <i class="fa-brands fa-apple"></i> 複製傳統網址
             </button>
             <button type="button" id="btnSimulateApplePay" class="btn-press py-2 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
               ⚡ 模擬 Apple Pay 刷卡
@@ -534,32 +541,69 @@
           </div>
         </div>
 
-        <div class="bg-white rounded-xl p-3 border border-indigo-100 space-y-2">
-          <div class="font-semibold text-slate-800">📱 方式 B：銀行推播 / 簡訊「全自動攔截入帳」</div>
-          <p class="text-[11px] text-slate-500 leading-relaxed">
-            收到「玉山 Wallet / 信用卡 / 簡訊」推播時自動發送 <code class="text-indigo-600 font-mono">POST {"text":"通知內容"}</code>：
-          </p>
-          <button type="button" id="btnCopyWebhookUrl" class="btn-press w-full py-2 rounded-xl bg-indigo-600 text-white font-semibold text-xs">
-            📋 一鍵複製通用推播 Webhook 網址
+        <!-- ==================== 方式 B：實體卡 / LINE Pay / 簡訊與郵件捷徑自動化 ==================== -->
+        <div class="bg-white rounded-2xl p-3.5 border border-indigo-200 space-y-2.5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+              <i class="fa-solid fa-mobile-screen-button text-indigo-600"></i> 方式 B：實體卡 / LINE Pay / 網購（iOS 捷徑 AI 自動化）
+            </span>
+            <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-semibold border border-indigo-200">適用所有刷卡</span>
+          </div>
+
+          <div class="rounded-xl bg-slate-50 p-2.5 space-y-1 text-[11px] text-slate-600 leading-relaxed border border-slate-200/70">
+            <div class="font-bold text-indigo-900">💡 連實體卡、LINE Pay、街口也能用 iOS 捷徑 AI 全自動抓！</div>
+            <div><b>步驟 1</b>：點下方紫色按鈕複製「<b>方式 B 專用 AI 提示詞</b>」。</div>
+            <div><b>步驟 2</b>：打開 iPhone「<b>捷徑</b>」➔ 底部「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 選擇「<b>電子郵件 (Email)</b>」或「<b>訊息 (Message)</b>」。</div>
+            <div><b>步驟 3</b>：條件設定「標題或內容包含：<b>玉山</b> 或 <b>消費</b> 或 <b>刷卡</b>」，勾選「<b>立即執行</b>」➔ 點「<b>新增空白自動化</b>」。</div>
+            <div><b>步驟 4</b>：在跳出的「<b>描述捷徑</b>」AI 框貼上提示詞送出！以後只要收到刷卡簡訊或信件，手機就會在背景秒級自動扣款！</div>
+          </div>
+
+          <button type="button" id="btnCopyMethodBAiPrompt" class="btn-press w-full py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> ✨ 一鍵複製「方式 B：全通路刷卡通知」捷徑 AI 提示詞
+          </button>
+
+          <button type="button" id="btnCopyWebhookUrl" class="btn-press w-full py-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold text-xs">
+            📋 備用：僅複製通用 Webhook 網址
           </button>
         </div>
 
-        <div class="bg-white rounded-xl p-3 border border-indigo-100 space-y-2">
-          <div class="font-semibold text-slate-800">☁️ 方式 C：Gmail 刷卡通知信 24h 全自動掃描</div>
-          <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="btnPollGmailNow" class="btn-press py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs">
-              🔄 立即掃描 Gmail 刷卡信
-            </button>
-            <button type="button" id="btnCopyGasScript" class="btn-press py-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold text-xs">
-              📋 複製 24h 雲端自動腳本
-            </button>
+        <!-- ==================== 方式 C：Gmail 24h 雲端全自動腳本 (Google Apps Script) ==================== -->
+        <div class="bg-white rounded-2xl p-3.5 border border-emerald-200 space-y-2.5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+              <i class="fa-solid fa-cloud-bolt text-emerald-600"></i> 方式 C：Gmail 刷卡通知信 24h 雲端全自動抓取
+            </span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-semibold border border-emerald-200">免開手機/電腦</span>
           </div>
+
+          <div class="rounded-xl bg-emerald-50/60 p-2.5 space-y-1 text-[11px] text-slate-700 leading-relaxed border border-emerald-200/70">
+            <div class="font-bold text-emerald-950">📖 複製雲端腳本後怎麼做？（只要設定 1 次，終身 24h 自動抓信）：</div>
+            <div><b>步驟 1</b>：點下方「<b>📋 1. 複製 24h 雲端自動腳本</b>」。</div>
+            <div><b>步驟 2</b>：點「<b>🌐 2. 開啟 Google 腳本頁</b>」（在瀏覽器登入你的 Gmail）➔ 點左上角「<b>＋ 新專案</b>」。</div>
+            <div><b>步驟 3</b>：把程式碼區原本的幾行字刪掉，<b>貼上剛剛複製的腳本</b>，按上方磁碟片「<b>💾 儲存專案</b>」。</div>
+            <div><b>步驟 4</b>：點左邊選單的「<b>⏰ 觸發條件（鬧鐘圖示）</b>」➔ 右下角「<b>＋ 新增觸發條件</b>」：<br/>
+              <span class="text-emerald-800">• 活動來源選「<b>時間驅動</b>」➔ 類型選「<b>分鐘計時器</b>」➔ 間隔選「<b>每分鐘</b>（或每 5 分鐘）」➔ 按儲存並允許 Google 授權即完成！</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btnCopyGasScript" class="btn-press py-2.5 px-2 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs">
+              📋 1. 複製 24h 雲端腳本
+            </button>
+            <a href="https://script.google.com/home/start" target="_blank" rel="noopener" class="btn-press py-2.5 px-2 rounded-xl bg-slate-900 text-white font-bold text-xs flex items-center justify-center gap-1 text-center">
+              🌐 2. 開啟 Google 腳本頁
+            </a>
+          </div>
+
+          <button type="button" id="btnPollGmailNow" class="btn-press w-full py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs">
+            🔄 本機立即掃描一次 Gmail 刷卡信
+          </button>
         </div>
 
         <label class="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-indigo-100 cursor-pointer">
           <div>
-            <div class="font-semibold text-slate-800">📋 方式 D：智慧剪貼簿自動感應</div>
-            <div class="text-[10px] text-slate-400">複製刷卡通知後切回畫面，免貼上自動辨識入帳</div>
+            <div class="font-semibold text-slate-800">📋 附加防護：智慧剪貼簿自動感應</div>
+            <div class="text-[10px] text-slate-400">複製任何刷卡通知後切回畫面，免貼上自動辨識入帳</div>
           </div>
           <input id="chkAutoClipboard" type="checkbox" checked class="w-4 h-4 accent-indigo-600" />
         </label>
@@ -735,8 +779,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v6"></script>
-  <script src="/js/app.js?v=20261021v6"></script>
+  <script src="/js/browserEngine.js?v=20261021v7"></script>
+  <script src="/js/app.js?v=20261021v7"></script>
 </body>
 </html>
 

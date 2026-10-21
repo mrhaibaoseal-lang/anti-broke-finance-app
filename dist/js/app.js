@@ -999,9 +999,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     const aiPrompt = `使用「取得 URL 內容」對 ${base}/api/notifications/apple-pay 發送 POST 要求，要求主體選擇 JSON，新增文字欄位 text 並設為「捷徑輸入」`;
     try {
       await navigator.clipboard.writeText(aiPrompt);
-      showAutoToast('✨ 已複製 iOS 捷徑 AI 提示詞！請直接貼入 iPhone「描述捷徑」輸入框');
+      showAutoToast('✨ 已複製「方式 A：Apple Pay」捷徑 AI 提示詞！請貼入 iPhone「描述捷徑」');
     } catch (_) {
       prompt('請複製以下 iOS 捷徑 AI 提示詞貼入「描述捷徑」：', aiPrompt);
+    }
+  });
+
+  $('#btnCopyMethodBAiPrompt')?.addEventListener('click', async () => {
+    const base = window.location?.origin || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev';
+    const aiPrompt = `使用「取得 URL 內容」對 ${base}/api/notifications/webhook 發送 POST 要求，要求主體選擇 JSON，新增文字欄位 text 並設為「捷徑輸入」`;
+    try {
+      await navigator.clipboard.writeText(aiPrompt);
+      showAutoToast('✨ 已複製「方式 B：全通路刷卡通知」捷徑 AI 提示詞！請貼入「描述捷徑」');
+    } catch (_) {
+      prompt('請複製以下「方式 B」iOS 捷徑 AI 提示詞貼入「描述捷徑」：', aiPrompt);
     }
   });
 
