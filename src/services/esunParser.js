@@ -238,6 +238,11 @@ function parseEsunNotification(rawText, options = {}) {
     throw new Error('通知文字不可為空');
   }
 
+  // 排除雲端服務預算警示、廣告預算上限等非扣款通知
+  if (/支出上限警告|預算上限|支出金額上限|達到支出金額上限|Google Cloud.*帳戶/i.test(cleanText)) {
+    throw new Error('非銀行扣款或帳戶通知（已自動過濾雲端預算警示）');
+  }
+
   const refDateStr = options.referenceDate || new Date().toISOString().slice(0, 10);
   const defaultYear = Number(refDateStr.slice(0, 4)) || new Date().getFullYear();
 

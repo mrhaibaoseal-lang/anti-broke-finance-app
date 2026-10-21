@@ -1539,6 +1539,11 @@ function parseEsunNotification(rawText, options = {}) {
     throw new Error('通知文字不可為空');
   }
 
+  // 排除雲端服務預算警示、廣告預算上限等非扣款通知
+  if (/支出上限警告|預算上限|支出金額上限|達到支出金額上限|Google Cloud.*帳戶/i.test(cleanText)) {
+    throw new Error('非銀行扣款或帳戶通知（已自動過濾雲端預算警示）');
+  }
+
   const refDateStr = options.referenceDate || new Date().toISOString().slice(0, 10);
   const defaultYear = Number(refDateStr.slice(0, 4)) || new Date().getFullYear();
 
@@ -3043,7 +3048,23 @@ function deleteTransactionRecord(db, txId) {
     `).run(refundAmt, newCash, `↩️ 刪除現金消費退回：${tx.normalized_merchant}`, nowIso);
   }
 
-  db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
+  // 若該筆交易曾轉入水庫 (如 ATM 提款自動存入皮包現金)，刪除時自動回扣水庫
+  const linkedLogs = db.prepare('SELECT * FROM wallet_tank_logs WHERE linked_tx_id = ?').all(tx.id);
+  for (const log of linkedLogs) {
+    if (log.delta_amount > 0) {
+      const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+      const col = log.tank_type === 'CASH' ? 'cash_balance' : 'easycard_balance';
+      const curBal = Number(tank?.[col]) || 0;
+      const newBal = Math.max(0, curBal - Number(log.delta_amount));
+      db.prepare(`UPDATE wallet_tank SET ${col} = ?, updated_at = ? WHERE id = 1`).run(newBal, nowIso);
+      db.prepare(`
+        INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+        VALUES (?, ?, ?, ?, NULL, ?)
+      `).run(log.tank_type, -Number(log.delta_amount), newBal, `↩️ 刪除交易扣回水庫：${tx.normalized_merchant}`, nowIso);
+    }
+  }
+
+    db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
   return { deletedId: tx.id };
 }
 
@@ -3177,7 +3198,11 @@ function decodeEmailMimeToText(rawMime) {
 
 function isBankTransactionEmailText(text) {
   const t = String(text || '');
-  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳|存款通知|存入通知|帳戶入帳|ATM|無卡存款|跨行存款|轉帳入帳/i.test(t);
+  // 排除常見的雲端服務預算警示、廣告支出上限、非銀行扣款通知
+  if (/支出上限警告|預算上限|支出金額上限|達到支出金額上限|Google Cloud|AWS Budget|Budget Alert|廣告預算/i.test(t)) {
+    return false;
+  }
+  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳|存款通知|存入通知|帳戶入帳|(?:ATM|自動櫃員機)\s*(?:存款|提款|存入|現金|跨行|無卡)|無卡存款|跨行存款|轉帳入帳/i.test(t);
   const hasAmount = /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(t);
   return hasBankOrCard && hasAmount;
 }

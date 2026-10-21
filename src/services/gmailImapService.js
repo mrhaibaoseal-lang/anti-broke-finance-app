@@ -117,7 +117,11 @@ function decodeEmailMimeToText(rawMime) {
 
 function isBankTransactionEmailText(text) {
   const t = String(text || '');
-  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳|存款通知|存入通知|帳戶入帳|ATM|無卡存款|跨行存款|轉帳入帳/i.test(t);
+  // 排除常見的雲端服務預算警示、廣告支出上限、非銀行扣款通知
+  if (/支出上限警告|預算上限|支出金額上限|達到支出金額上限|Google Cloud|AWS Budget|Budget Alert|廣告預算/i.test(t)) {
+    return false;
+  }
+  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳|存款通知|存入通知|帳戶入帳|(?:ATM|自動櫃員機)\s*(?:存款|提款|存入|現金|跨行|無卡)|無卡存款|跨行存款|轉帳入帳/i.test(t);
   const hasAmount = /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(t);
   return hasBankOrCard && hasAmount;
 }

@@ -292,9 +292,7 @@ function renderTransactionsList(transactions = []) {
     if (tx.status === 'UNKNOWN_GAP') {
       actions.push(`<button data-gap-tx="${tx.id}" data-gap-amt="${tx.personal_amount}" class="btn-press btn-primary px-3.5 py-2 rounded-xl text-xs">✨ 拆分黑洞</button>`);
     }
-    if (isDeposit || isCashSpent) {
-      actions.push(`<button data-del-tx="${tx.id}" class="btn-press btn-danger-soft px-3.5 py-2 rounded-xl text-xs">🗑️ 刪除此筆紀錄</button>`);
-    }
+    actions.push(`<button data-del-tx="${tx.id}" class="btn-press btn-danger-soft px-3.5 py-2 rounded-xl text-xs">🗑️ 刪除此筆紀錄</button>`);
 
     let amountHtml;
     if (isDeposit) {

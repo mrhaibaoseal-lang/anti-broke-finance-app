@@ -691,8 +691,46 @@ test('14. 皮包現金與悠遊卡自訂輸入加值與扣款：支援 60、+60�
   assert.equal(subEasy45.data.walletTank.easycardBalance, 75);
 });
 
+test('15. 雲端支出上限警示防誤判與交易刪除水庫自動回滾：GCP 預算信不誤判為消費或 ATM 提款，且刪除提款紀錄自動扣回皮包餘額', async () => {
+  const { isBankTransactionEmailText } = require('../src/services/gmailImapService');
+  const { parseEsunNotification } = require('../src/services/esunParser');
+  const { deleteTransactionRecord } = require('../src/services/accountingPatchService');
+  const db = setupTestDb();
 
+  // 1. 測試 GCP 預算上限警示信被 Gmail IMAP 掃到時，應直接被過濾
+  const gcpEmailText = 'Warning 帳單支出上限警告\n帳單帳戶：我的帳單帳戶 (016E2E-47C0FE-37BB51)\n專案：無\n支出金額上限 $9,500.00\n目前支出：$9,500.00\nBase64 Chunk: aTm9500xyz';
+  assert.equal(isBankTransactionEmailText(gcpEmailText), false);
 
+  // 2. parseEsunNotification 遇到支出上限警告應拋出錯誤
+  assert.throws(() => {
+    parseEsunNotification(gcpEmailText);
+  }, /非銀行扣款或帳戶通知/);
 
+  // 3. 測試刪除曾轉入水庫的交易時，自動扣回皮包現金餘額
+  db.prepare('UPDATE wallet_tank SET cash_balance = 10000 WHERE id = 1').run();
+  db.prepare(`
+    INSERT INTO transactions (id, cycle_key, status, raw_merchant, normalized_merchant, category, auth_amount, effective_amount, personal_amount, tx_date, tx_timestamp, created_at)
+    VALUES (999, '2026-10', 'SETTLED', '我的帳單帳戶', '我的帳單帳戶', 'ATM提款', 9500, 9500, 9500, '2026-10-01', datetime('now'), datetime('now'))
+  `).run();
+  db.prepare(`
+    INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+    VALUES ('CASH', 9500, 10000, 'ATM提款自動存入皮包現金', 999, datetime('now'))
+  `).run();
 
+  // 刪除此交易
+  deleteTransactionRecord(db, 999);
+
+  // 驗證交易已刪除
+  const tx = db.prepare('SELECT * FROM transactions WHERE id = 999').get();
+  assert.equal(tx, undefined);
+
+  // 驗證 wallet_tank 現金已自動扣回 9500 (10000 - 9500 = 500)
+  const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+  assert.equal(tank.cash_balance, 500);
+
+  // 驗證有寫入負向回滾日誌
+  const rollbackLog = db.prepare('SELECT * FROM wallet_tank_logs WHERE delta_amount = -9500').get();
+  assert.ok(rollbackLog);
+  assert.ok(rollbackLog.note.includes('刪除交易扣回水庫'));
+});
 

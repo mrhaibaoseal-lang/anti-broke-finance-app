@@ -420,7 +420,23 @@ function deleteTransactionRecord(db, txId) {
     `).run(refundAmt, newCash, `↩️ 刪除現金消費退回：${tx.normalized_merchant}`, nowIso);
   }
 
-  db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
+  // 若該筆交易曾轉入水庫 (如 ATM 提款自動存入皮包現金)，刪除時自動回扣水庫
+  const linkedLogs = db.prepare('SELECT * FROM wallet_tank_logs WHERE linked_tx_id = ?').all(tx.id);
+  for (const log of linkedLogs) {
+    if (log.delta_amount > 0) {
+      const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+      const col = log.tank_type === 'CASH' ? 'cash_balance' : 'easycard_balance';
+      const curBal = Number(tank?.[col]) || 0;
+      const newBal = Math.max(0, curBal - Number(log.delta_amount));
+      db.prepare(`UPDATE wallet_tank SET ${col} = ?, updated_at = ? WHERE id = 1`).run(newBal, nowIso);
+      db.prepare(`
+        INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+        VALUES (?, ?, ?, ?, NULL, ?)
+      `).run(log.tank_type, -Number(log.delta_amount), newBal, `↩️ 刪除交易扣回水庫：${tx.normalized_merchant}`, nowIso);
+    }
+  }
+
+    db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
   return { deletedId: tx.id };
 }
 
