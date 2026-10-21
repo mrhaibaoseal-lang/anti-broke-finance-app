@@ -1,9 +1,15 @@
 'use strict';
 
-const { readExternalShiftDirectory, parseShiftPayload, saveLatestShiftSyncCache, calculateEstimatedNetPay } = require('./shiftSyncService');
+const { readExternalShiftDirectory, parseShiftPayload, saveLatestShiftSyncCache, calculateEstimatedNetPay, computeShiftPayForExactMonth } = require('./shiftSyncService');
 
 function pad2(n) {
   return String(n).padStart(2, '0');
+}
+
+function getPreviousYearMonth(ymStr) {
+  const [y, m] = String(ymStr || '2026-10').slice(0, 7).split('-').map(Number);
+  if (!y || !m) return '2026-09';
+  return m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`;
 }
 
 function formatYMD(dt) {
@@ -231,9 +237,68 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
   const refDate = (referenceDateStr || getTaipeiTodayYMD()).slice(0, 10);
   const cycle = ensureCurrentCycle(db, refDate);
 
-  const effectiveIncome = cycle.is_salary_settled && cycle.actual_salary !== null
-    ? Number(cycle.actual_salary)
-    : Number(cycle.estimated_net_pay);
+  let parsedRawShiftPayload = null;
+  if (cycle.raw_shift_payload) {
+    try {
+      parsedRawShiftPayload = JSON.parse(cycle.raw_shift_payload);
+    } catch (_) {}
+  }
+
+  // 時間對照模式：預設為 NEXT_MONTH_PAY（次月發薪制：這個月上班排班 ➔ 下個月發薪日才領；目前週期花的是上個月班表或目前已領薪水）
+  const mappingMode = settings.llm_api_key === 'SAME_MONTH_PAY' ? 'SAME_MONTH_PAY' : 'NEXT_MONTH_PAY';
+  const accumulatingShiftMonth = cycle.target_shift_month; // 例如 2026-10（目前正在上班累積的班表月份）
+  const earnedShiftMonth = getPreviousYearMonth(accumulatingShiftMonth); // 例如 2026-09（上個月上班、已於本週期發薪日入帳的班表月份）
+
+  const fullState = parsedRawShiftPayload?.fullState || null;
+  const prevMonthShift = fullState
+    ? computeShiftPayForExactMonth(fullState, earnedShiftMonth)
+    : { month: earnedShiftMonth, hourlyWage: cycle.hourly_wage || 200, totalPay: 0, normalPay: 0, normalHours: 0, otPay: 0, otMinutes: 0, bonusOk: false, bonusPay: 0, shiftCount: 0 };
+  const currMonthShift = fullState
+    ? computeShiftPayForExactMonth(fullState, accumulatingShiftMonth)
+    : {
+        month: accumulatingShiftMonth,
+        hourlyWage: cycle.hourly_wage || 200,
+        totalPay: Number(cycle.shift_gross_pay) || 0,
+        normalPay: Number(cycle.shift_gross_pay) || 0,
+        normalHours: Number(cycle.normal_hours) || 0,
+        otPay: 0,
+        otMinutes: Number(cycle.ot_minutes) || 0,
+        bonusOk: Number(cycle.bonus_pay) > 0,
+        bonusPay: Number(cycle.bonus_pay) || 0,
+        shiftCount: Number(parsedRawShiftPayload?.shiftCount) || 0
+      };
+
+  const prevMonthEstNet = calculateEstimatedNetPay(prevMonthShift.totalPay, settings.net_pay_factor, settings.labor_health_deduction);
+  const currMonthEstNet = calculateEstimatedNetPay(currMonthShift.totalPay, settings.net_pay_factor, settings.labor_health_deduction);
+
+  let effectiveIncome;
+  let activeSourceType;
+  let activeSourceLabel;
+
+  if (cycle.is_salary_settled && cycle.actual_salary !== null) {
+    effectiveIncome = Number(cycle.actual_salary);
+    activeSourceType = 'MANUAL_SETTLED';
+    activeSourceLabel = `手動設定目前已領薪資 ($${effectiveIncome.toLocaleString()})`;
+  } else if (fullState) {
+    if (mappingMode === 'NEXT_MONTH_PAY') {
+      effectiveIncome = prevMonthEstNet;
+      if (prevMonthShift.shiftCount > 0 || prevMonthShift.totalPay > 0) {
+        activeSourceType = 'PREV_MONTH_SHIFT';
+        activeSourceLabel = `${earnedShiftMonth} 上月班表（${cycle.start_date.slice(5).replace('-', '/')} 已發薪）`;
+      } else {
+        activeSourceType = 'AWAITING_CURRENT_BUDGET';
+        activeSourceLabel = `待設定目前可用薪水（${accumulatingShiftMonth} 班表為下月發薪）`;
+      }
+    } else {
+      effectiveIncome = currMonthShift.totalPay > 0 ? currMonthEstNet : Number(cycle.estimated_net_pay);
+      activeSourceType = 'CURR_MONTH_SHIFT';
+      activeSourceLabel = `${accumulatingShiftMonth} 本月班表（當月直接抵用）`;
+    }
+  } else {
+    effectiveIncome = Number(cycle.estimated_net_pay);
+    activeSourceType = 'ESTIMATED_SUMMARY';
+    activeSourceLabel = '預估實領薪資';
+  }
 
   const fixedRow = db.prepare('SELECT COALESCE(SUM(monthly_amount), 0) AS total_fixed FROM fixed_expenses WHERE is_active = 1').get();
   const fixedAndInstallments = Number(fixedRow.total_fixed) || 0;
@@ -290,25 +355,75 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
   }
 
   const tier = isInitialZeroState
-    ? {
-        code: 'WEALTHY',
-        emoji: '✨',
-        label: '初始待設定狀態',
-        rangeText: '請輸入本月薪資',
-        themeColor: 'emerald',
-        advice: '帳本已歸零為初始狀態！請點選右上角「💰 設定薪資 / 班表同步」輸入您目前的薪資與時薪，並新增您的固定扣款與消費。'
-      }
+    ? (currMonthEstNet > 0 && mappingMode === 'NEXT_MONTH_PAY'
+        ? {
+            code: 'WEALTHY',
+            emoji: '⏳',
+            label: '下月薪資累積中 · 待設目前預算',
+            rangeText: `下月預估 $${currMonthEstNet.toLocaleString()}`,
+            themeColor: 'emerald',
+            advice: `⏳ 時間對照提醒：您在班表登記的 ${Number(accumulatingShiftMonth.slice(5))} 月份排班（預估實領 $${currMonthEstNet.toLocaleString()}）是下個月才發的薪水！請在下方「時間對照卡」輸入您現在手頭可用的薪水，或點選「切換為當月抵用」。`
+          }
+        : {
+            code: 'WEALTHY',
+            emoji: '✨',
+            label: '初始待設定狀態',
+            rangeText: '請輸入本月薪資',
+            themeColor: 'emerald',
+            advice: '帳本已歸零為初始狀態！請點選右上角「💰 設定薪資 / 班表同步」輸入您目前的薪資與時薪，並新增您的固定扣款與消費。'
+          })
     : evaluateSurvivalTier(dailySafeBudget);
 
-  let parsedRawShiftPayload = null;
-  if (cycle.raw_shift_payload) {
-    try {
-      parsedRawShiftPayload = JSON.parse(cycle.raw_shift_payload);
-    } catch (_) {}
-  }
+  // 計算下個發薪週期 (Next Payday Cycle) 供時間對照顯示
+  const endDtNext = new Date(`${cycle.end_date}T00:00:00`);
+  endDtNext.setDate(endDtNext.getDate() + 1);
+  const nextPaydayDateStr = formatYMD(endDtNext);
+  const nextRange = getCycleRangeForDate(nextPaydayDateStr, settings.payday_day);
+  const nextStartMs = new Date(`${nextRange.startDate}T00:00:00`).getTime();
+  const nextEndMs = new Date(`${nextRange.endDate}T00:00:00`).getTime();
+  const nextTotalCycleDays = Math.max(1, Math.round((nextEndMs - nextStartMs) / 86400000) + 1);
+  const projectedNextDisposable = Math.max(0, currMonthEstNet - fixedAndInstallments);
+  const projectedNextDailySafe = Math.floor(projectedNextDisposable / nextTotalCycleDays);
+
+  const timeMapping = {
+    mappingMode,
+    realToday: refDate,
+    paydayDay: settings.payday_day,
+    currentCycle: {
+      cycleKey: cycle.cycle_key,
+      startDate: cycle.start_date,
+      endDate: cycle.end_date,
+      paydayDate: cycle.start_date,
+      daysRemaining,
+      earnedShiftMonth,
+      prevMonthShift: {
+        ...prevMonthShift,
+        estimatedNetPay: prevMonthEstNet
+      },
+      activeSourceType,
+      activeSourceLabel,
+      effectiveIncome
+    },
+    upcomingCycle: {
+      workMonth: accumulatingShiftMonth,
+      paydayDate: nextRange.startDate,
+      cycleStartDate: nextRange.startDate,
+      cycleEndDate: nextRange.endDate,
+      totalCycleDays: nextTotalCycleDays,
+      daysUntilPayday: daysRemaining,
+      currMonthShift: {
+        ...currMonthShift,
+        estimatedNetPay: currMonthEstNet
+      },
+      fixedAndInstallments,
+      projectedDisposable: projectedNextDisposable,
+      projectedDailySafe: projectedNextDailySafe
+    }
+  };
 
   return {
     referenceDate: refDate,
+    timeMapping,
     cycle: {
       cycleKey: cycle.cycle_key, startDate: cycle.start_date, endDate: cycle.end_date,
       paydayDay: settings.payday_day, totalCycleDays, daysElapsed, daysRemaining,

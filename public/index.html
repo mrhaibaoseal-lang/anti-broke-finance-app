@@ -163,6 +163,60 @@
         </div>
       </div>
 
+      <!-- ⏳ 新增：薪資班表 ↔ 現實發薪時間對照中心卡片 -->
+      <div id="timeMappingCard" class="bento-card p-5 space-y-3.5 border border-emerald-100 bg-white">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 grid place-items-center text-xs">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+            </span>
+            <div>
+              <div class="text-xs font-bold text-slate-900">⏳ 薪資班表 ↔ 現實發薪時間對照</div>
+              <div id="tmTodayMeta" class="text-[11px] text-slate-400 tabular-nums">現實時間 -- · 每月 10 號發薪</div>
+            </div>
+          </div>
+          <button type="button" id="btnToggleMappingMode" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold">
+            🕒 次月發薪制
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <!-- 左欄：現在正在花的錢 (本週期) -->
+          <div class="rounded-2xl bg-slate-50 border border-slate-200/80 p-3 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">🟢 現在能花的錢</span>
+              <span id="tmCurrentCycleRange" class="text-[10px] text-slate-400 tabular-nums">--~--</span>
+            </div>
+            <div id="tmCurrentSourceTitle" class="text-[11px] font-semibold text-slate-700 truncate">對應上月班表 / 已領薪水</div>
+            <div id="tmCurrentIncomeVal" class="text-xl font-extrabold text-slate-900 tabular-nums">$0</div>
+            <div id="tmCurrentSubMeta" class="text-[10px] text-slate-500 leading-tight">上月排班 0 天 (0h)</div>
+          </div>
+
+          <!-- 右欄：這個月上班累積、下個月才領的錢 (下週期) -->
+          <div class="rounded-2xl bg-indigo-50/60 border border-indigo-200/80 p-3 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">🔮 下個月才領的錢</span>
+              <span id="tmNextCountdownBadge" class="text-[10px] font-bold text-indigo-600 tabular-nums">倒數 -- 天</span>
+            </div>
+            <div id="tmUpcomingSourceTitle" class="text-[11px] font-semibold text-indigo-950 truncate">本月班表 ➔ 下月發薪</div>
+            <div id="tmUpcomingNetVal" class="text-xl font-extrabold text-indigo-700 tabular-nums">$0</div>
+            <div id="tmUpcomingSubMeta" class="text-[10px] text-indigo-900/75 leading-tight">本月已排 0 天 · 下月可用 $0/天</div>
+          </div>
+        </div>
+
+        <div class="rounded-2xl bg-amber-50/70 border border-amber-200/70 p-3 space-y-2">
+          <div id="tmExplainText" class="text-[11px] text-amber-900 leading-relaxed">
+            💡 你現在打開班表 App 登記的是「<b>這個月上班的天數</b>」，薪水會在<b>下個月發薪日</b>才入帳！現在這個月要花的預算請設定在下方（不會影響下月班表累積）：
+          </div>
+          <div class="flex items-center gap-1.5">
+            <input id="quickCurrentSalaryInput" type="number" min="0" class="input-fintech flex-1 !py-1.5 !px-3 !rounded-xl text-xs font-bold" placeholder="輸入現在(本月)手頭實際可花預算 $" />
+            <button type="button" id="btnSetQuickCurrentSalary" class="btn-press shrink-0 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-semibold">
+              設定目前預算
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="bento-card p-5">
         <div class="grid grid-cols-3 divide-x divide-slate-100 text-center">
           <div class="px-2">
@@ -689,8 +743,30 @@
         </div>
       </div>
 
+      <!-- ⏳ 彈窗內：薪資班表 ↔ 現實發薪時間對照切換 -->
+      <div class="rounded-2xl bg-amber-50/80 border border-amber-200 p-3.5 space-y-2.5 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-amber-950 flex items-center gap-1.5">
+            <i class="fa-solid fa-clock text-amber-600"></i> 班表月份 ↔ 現實發薪時間對照模式
+          </span>
+          <span id="modalMappingModeBadge" class="px-2 py-0.5 rounded-full bg-white text-amber-800 font-bold text-[10px] border border-amber-200">次月發薪制</span>
+        </div>
+        <div id="modalTimeMappingSummary" class="text-[11px] text-amber-900/90 leading-relaxed">
+          • <b>現在花的錢</b>：對應上個月班表或下方手動輸入的目前已領薪資<br/>
+          • <b>現在排的班</b>：對應這個月上班累積、下個月發薪日才會拿到的薪水
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" data-set-mapping-mode="NEXT_MONTH_PAY" class="mapping-mode-btn btn-press py-2 px-2 rounded-xl bg-slate-900 text-white font-bold text-[11px]">
+            🕒 次月發薪（本月班＝下月領）
+          </button>
+          <button type="button" data-set-mapping-mode="SAME_MONTH_PAY" class="mapping-mode-btn btn-press py-2 px-2 rounded-xl bg-white border border-amber-200 text-slate-700 font-semibold text-[11px]">
+            ⚡ 當月抵用（本月班＝現在花）
+          </button>
+        </div>
+      </div>
+
       <div class="pt-1 border-t border-slate-100 space-y-3">
-        <div class="text-xs font-semibold text-slate-500">或直接手動指定固定月薪 / 時薪：</div>
+        <div class="text-xs font-semibold text-slate-500">或直接手動指定「目前這個月手頭可用薪資」/ 時薪：</div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="text-xs text-slate-400 block mb-1">本月實領薪資 ($)</label>
@@ -801,8 +877,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v11"></script>
-  <script src="/js/app.js?v=20261021v11"></script>
+  <script src="/js/browserEngine.js?v=20261021v12"></script>
+  <script src="/js/app.js?v=20261021v12"></script>
 </body>
 </html>
 

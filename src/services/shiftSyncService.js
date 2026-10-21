@@ -241,8 +241,54 @@ function calculateEstimatedNetPay(grossPay, netPayFactor = 0.95, laborHealthDedu
   return Math.max(0, Math.round(grossPay * factor) - deduction);
 }
 
+function computeShiftPayForExactMonth(shiftState, exactYearMonth) {
+  const settings = (shiftState && shiftState.settings) || {};
+  const hourlyWage = Number(settings.hourlyWage) || 200;
+  const otMultiplier = Number.isFinite(Number(settings.otMultiplier)) ? Number(settings.otMultiplier) : 1;
+  const roundingMode = settings.roundingMode || 'monthly';
+  const attendanceBonus = Number(settings.attendanceBonus) || 0;
+  const shifts = (shiftState && shiftState.shifts) || {};
+
+  const ym = String(exactYearMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
+  const prefix = ym + '-';
+  const days = Object.keys(shifts).filter(k => k.startsWith(prefix)).sort();
+  const ratePerMin = hourlyWage / 60;
+  let nMin = 0, oMin = 0, otDailySum = 0, leaveCount = 0;
+
+  for (const key of days) {
+    const sh = shifts[key];
+    if (!sh) continue;
+    const nm = isUnpaid(sh) ? 0 : Math.max(0, spanMin(sh.start, sh.end) - (Number(sh.breakMin) || 0));
+    const om = isUnpaid(sh) ? 0 : Math.max(0, Math.floor(Number(sh.otMin) || 0));
+    nMin += nm;
+    oMin += om;
+    otDailySum += Math.round(om * ratePerMin * otMultiplier);
+    if (sh.status === 'leave') leaveCount++;
+  }
+
+  const normalPay = Math.round(nMin * ratePerMin);
+  const otPay = roundingMode === 'daily' ? otDailySum : Math.round(oMin * ratePerMin * otMultiplier);
+  const bonusOk = days.length > 0 && leaveCount === 0;
+  const bonusPay = bonusOk ? attendanceBonus : 0;
+
+  return {
+    month: ym,
+    employee: settings.myName || '王凱弘',
+    hourlyWage,
+    totalPay: normalPay + otPay + bonusPay,
+    normalPay,
+    normalHours: Number((nMin / 60).toFixed(2)),
+    otPay,
+    otMinutes: oMin,
+    bonusOk,
+    bonusPay,
+    shiftCount: days.length
+  };
+}
+
 module.exports = {
   computeShiftPayFromFullState,
+  computeShiftPayForExactMonth,
   parseShiftPayload,
   saveLatestShiftSyncCache,
   readExternalShiftDirectory,

@@ -115,12 +115,13 @@ async function handleCloudflareApiRequest(request, env) {
         }
       }
 
-      // 保護已綁定的 Gmail 帳號與應用程式密碼
+      // 保護已綁定的 Gmail 帳號、應用程式密碼與班表時間對照模式
       const bestSet = bestSnapshot?.tables?.user_settings?.[0];
       const otherSet = otherSnapshot?.tables?.user_settings?.[0];
       if (bestSet && otherSet) {
         if (!bestSet.gmail_user && otherSet.gmail_user) bestSet.gmail_user = otherSet.gmail_user;
         if (!bestSet.gmail_app_password && otherSet.gmail_app_password) bestSet.gmail_app_password = otherSet.gmail_app_password;
+        if (!bestSet.llm_api_key && otherSet.llm_api_key) bestSet.llm_api_key = otherSet.llm_api_key;
       }
     } else {
       bestSnapshot = d1Snapshot || clientSnapshot;

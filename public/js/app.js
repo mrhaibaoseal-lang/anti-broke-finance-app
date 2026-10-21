@@ -193,6 +193,7 @@ function renderDashboard(state) {
   renderRadarSection(radar);
   renderPatchesSection(walletTank, splitBills);
   renderSettingsSection(settings);
+  renderTimeMappingSection(survival.timeMapping, survival);
 
   // 若雲端週期含有已綁定的完整班表狀態，自動寫入本機 shiftpay.v1 讓內嵌與分頁排班表直接顯示完整資料
   try {
@@ -494,6 +495,96 @@ function renderPatchesSection(walletTank, splitBills) {
       `).join('');
     }
   }
+}
+
+function renderTimeMappingSection(tm, survival) {
+  if (!tm) return;
+  const isNextMonthPay = tm.mappingMode !== 'SAME_MONTH_PAY';
+  const cur = tm.currentCycle || {};
+  const up = tm.upcomingCycle || {};
+  const prevSh = cur.prevMonthShift || {};
+  const currSh = up.currMonthShift || {};
+
+  const earnedM = Number(String(cur.earnedShiftMonth || '').slice(5)) || '--';
+  const workM = Number(String(up.workMonth || '').slice(5)) || '--';
+  const curPaydayLabel = String(cur.paydayDate || '').slice(5).replace('-', '/');
+  const nextPaydayLabel = String(up.paydayDate || '').slice(5).replace('-', '/');
+
+  if ($('#tmTodayMeta')) {
+    $('#tmTodayMeta').textContent = `現實時間 ${String(tm.realToday || '').slice(5).replace('-', '/')} · 每月 ${tm.paydayDay} 號發薪`;
+  }
+  if ($('#btnToggleMappingMode')) {
+    $('#btnToggleMappingMode').textContent = isNextMonthPay
+      ? '🕒 次月發薪制（點此切換）'
+      : '⚡ 當月抵用制（點此切換）';
+    $('#btnToggleMappingMode').className = isNextMonthPay
+      ? 'btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold'
+      : 'btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[10px] font-bold';
+  }
+
+  if ($('#tmCurrentCycleRange')) {
+    $('#tmCurrentCycleRange').textContent = `${String(cur.startDate || '').slice(5).replace('-', '/')}~${String(cur.endDate || '').slice(5).replace('-', '/')}`;
+  }
+  if ($('#tmCurrentSourceTitle')) {
+    if (cur.activeSourceType === 'MANUAL_SETTLED') {
+      $('#tmCurrentSourceTitle').textContent = `💵 手動設定本月已領薪水`;
+    } else if (isNextMonthPay) {
+      $('#tmCurrentSourceTitle').textContent = `📅 ${earnedM}月班表 ➔ ${curPaydayLabel} 已發薪`;
+    } else {
+      $('#tmCurrentSourceTitle').textContent = `⚡ ${workM}月班表（當月直接抵用）`;
+    }
+  }
+  if ($('#tmCurrentIncomeVal')) {
+    $('#tmCurrentIncomeVal').textContent = fmtMoney(cur.effectiveIncome || 0);
+  }
+  if ($('#tmCurrentSubMeta')) {
+    if (cur.activeSourceType === 'MANUAL_SETTLED') {
+      $('#tmCurrentSubMeta').textContent = `本週期固定預算 · 不受 ${workM} 月新排班覆蓋`;
+    } else if (isNextMonthPay) {
+      if ((prevSh.shiftCount || 0) > 0) {
+        $('#tmCurrentSubMeta').textContent = `${earnedM}月排班 ${prevSh.shiftCount} 天 (${prevSh.normalHours}h) · 帳面 ${fmtMoney(prevSh.totalPay)}`;
+      } else {
+        $('#tmCurrentSubMeta').textContent = `${earnedM}月無班表紀錄 · 請在下方設定目前手頭預算`;
+      }
+    } else {
+      $('#tmCurrentSubMeta').textContent = `直接以 ${workM} 月班表 (${currSh.shiftCount || 0}天) 作為目前預算`;
+    }
+  }
+
+  if ($('#tmNextCountdownBadge')) {
+    $('#tmNextCountdownBadge').textContent = `${nextPaydayLabel} 發薪 (倒數 ${up.daysUntilPayday} 天)`;
+  }
+  if ($('#tmUpcomingSourceTitle')) {
+    $('#tmUpcomingSourceTitle').textContent = `📅 ${workM}月班表累積 ➔ ${nextPaydayLabel} 領`;
+  }
+  if ($('#tmUpcomingNetVal')) {
+    $('#tmUpcomingNetVal').textContent = fmtMoney(currSh.estimatedNetPay || 0);
+  }
+  if ($('#tmUpcomingSubMeta')) {
+    $('#tmUpcomingSubMeta').textContent = `${workM}月已排 ${currSh.shiftCount || 0} 天 (${currSh.normalHours || 0}h) · 下月可用 ${fmtMoney(up.projectedDailySafe || 0)}/天`;
+  }
+
+  if ($('#tmExplainText')) {
+    if (isNextMonthPay) {
+      $('#tmExplainText').innerHTML = `💡 <b>次月發薪對照中</b>：你現在打開班表 App 登記的 <b>${workM} 月份排班（預估實領 ${fmtMoney(currSh.estimatedNetPay || 0)}）</b>會在下個月 <b>${nextPaydayLabel}</b> 才發薪！現在（${String(cur.startDate || '').slice(5).replace('-', '/')}~${String(cur.endDate || '').slice(5).replace('-', '/')}）手頭實際可花的錢請直接填在下方：`;
+    } else {
+      $('#tmExplainText').innerHTML = `⚡ <b>當月直接抵用中</b>：目前直接將 <b>${workM} 月份班表（${fmtMoney(currSh.estimatedNetPay || 0)}）</b>當作現在的預算。若你的薪水是下個月（${nextPaydayLabel}）才發，可點右上角切回「<b>🕒 次月發薪制</b>」！`;
+    }
+  }
+
+  if ($('#modalMappingModeBadge')) {
+    $('#modalMappingModeBadge').textContent = isNextMonthPay ? '次月發薪制（推薦）' : '當月直接抵用';
+  }
+  if ($('#modalTimeMappingSummary')) {
+    $('#modalTimeMappingSummary').innerHTML = `
+      • <b>現在能花的錢 (${String(cur.startDate || '').slice(5).replace('-', '/')}~${String(cur.endDate || '').slice(5).replace('-', '/')})</b>：${esc(cur.activeSourceLabel || '')} ➔ <b>${fmtMoney(cur.effectiveIncome || 0)}</b><br/>
+      • <b>下個月才領的錢 (${nextPaydayLabel} 發薪)</b>：對應 <b>${workM} 月班表 (${currSh.shiftCount || 0} 天 / ${currSh.normalHours || 0}h)</b> ➔ 預估實領 <b>${fmtMoney(currSh.estimatedNetPay || 0)}</b>
+    `;
+  }
+  $$('[data-set-mapping-mode]').forEach(btn => {
+    const active = btn.dataset.setMappingMode === tm.mappingMode;
+    btn.className = `mapping-mode-btn btn-press py-2 px-2 rounded-xl text-[11px] ${active ? 'bg-slate-900 text-white font-bold shadow-xs' : 'bg-white border border-amber-200 text-slate-700 font-semibold'}`;
+  });
 }
 
 function renderSettingsSection(settings) {
@@ -1068,6 +1159,52 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('#auditEasyInput').value = '';
     $('#auditCashInput').value = '';
     renderDashboard(res.dashboard);
+  });
+
+  // ⏳ 薪資班表 ↔ 現實發薪時間對照模式切換與目前預算設定
+  const switchMappingMode = async targetMode => {
+    const res = await apiCall('/api/shift/sync', 'POST', {
+      mappingMode: targetMode,
+      clearManualSalary: targetMode === 'SAME_MONTH_PAY',
+      recalculateOnly: true
+    });
+    renderDashboard(res.dashboard);
+    showAutoToast(
+      targetMode === 'NEXT_MONTH_PAY'
+        ? '🕒 已切換為「次月發薪制」：本月排班歸入下月發薪預估！'
+        : '⚡ 已切換為「當月抵用制」：直接以本月排班作為目前可用預算！'
+    );
+  };
+
+  $('#btnToggleMappingMode')?.addEventListener('click', async () => {
+    const curMode = dashboardState?.survival?.timeMapping?.mappingMode || 'NEXT_MONTH_PAY';
+    const nextMode = curMode === 'NEXT_MONTH_PAY' ? 'SAME_MONTH_PAY' : 'NEXT_MONTH_PAY';
+    await switchMappingMode(nextMode);
+  });
+
+  $$('[data-set-mapping-mode]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await switchMappingMode(btn.dataset.setMappingMode);
+    });
+  });
+
+  const handleSetQuickCurrentSalary = async () => {
+    const inputEl = $('#quickCurrentSalaryInput');
+    if (!inputEl) return;
+    const val = inputEl.value.trim();
+    if (val === '') return alert('請輸入目前（本週期）手頭實際可用的薪水預算金額！');
+    const res = await apiCall('/api/shift/sync', 'POST', {
+      manualNetSalary: Number(val),
+      mappingMode: 'NEXT_MONTH_PAY'
+    });
+    inputEl.value = '';
+    renderDashboard(res.dashboard);
+    showAutoToast(`💵 已設定目前週期可用預算 $${Number(val).toLocaleString()}（本月排班將繼續累積於下月發薪預估）！`);
+  };
+
+  $('#btnSetQuickCurrentSalary')?.addEventListener('click', handleSetQuickCurrentSalary);
+  $('#quickCurrentSalaryInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleSetQuickCurrentSalary();
   });
 
   // 📲 導入手機主畫面「打工薪水帳」備份檔 (.json) 或剪貼簿資料

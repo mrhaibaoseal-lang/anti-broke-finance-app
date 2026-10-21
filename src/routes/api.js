@@ -303,22 +303,34 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
   }
 
   if (method === 'POST' && (pathname === '/api/shift/sync' || pathname === '/api/shift/webhook')) {
+    if (body.mappingMode === 'NEXT_MONTH_PAY' || body.mappingMode === 'SAME_MONTH_PAY') {
+      db.prepare('UPDATE user_settings SET llm_api_key = ?, updated_at = ? WHERE id = 1')
+        .run(body.mappingMode, new Date().toISOString());
+    }
+    if (body.clearManualSalary === true) {
+      const curCycle = syncCycleWithShiftData(db, { recalculateOnly: true, referenceDateStr: body.referenceDate || null });
+      db.prepare('UPDATE income_cycles SET actual_salary = NULL, is_salary_settled = 0, last_synced_at = ? WHERE cycle_key = ?')
+        .run(new Date().toISOString(), curCycle.cycle_key);
+    }
     const cycle = syncCycleWithShiftData(db, {
       rawJsonPayload: body.rawJsonPayload || body.shiftState || body.payload || null,
       manualNetSalary: body.manualNetSalary,
       manualGrossPay: body.manualGrossPay,
       manualHourlyWage: body.manualHourlyWage,
+      recalculateOnly: Boolean(body.recalculateOnly),
       isAutoSync: Boolean(body.autoSync),
       referenceDateStr: body.referenceDate || null
     });
-    const effective = cycle.is_salary_settled && cycle.actual_salary !== null ? cycle.actual_salary : cycle.estimated_net_pay;
+    const fullDash = buildFullDashboardSnapshot(db);
+    const effective = fullDash.survival.budget.effectiveIncome;
+    const nextEst = fullDash.survival.timeMapping?.upcomingCycle?.currMonthShift?.estimatedNetPay || 0;
     return {
       status: 200,
       data: {
         ok: true,
-        message: `✅ 已自動同步本月薪資與班表！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
+        message: `✅ 已同步薪資與時間對照！目前可用預算 $${effective.toLocaleString()}｜下月發薪預估 $${nextEst.toLocaleString()}`,
         cycle,
-        dashboard: buildFullDashboardSnapshot(db)
+        dashboard: fullDash
       }
     };
   }

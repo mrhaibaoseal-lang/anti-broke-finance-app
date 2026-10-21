@@ -518,6 +518,34 @@ test('12. 修復三大已知問題：現金/悠遊卡自訂負數扣款不歸零
   assert.equal(nightStatus.taipeiHour, 1);
   assert.equal(nightStatus.isLateNight, true);
   assert.equal(nightStatus.isHighRisk, true);
+
+  // (7) 驗證「⏳ 薪資班表 ↔ 現實發薪時間對照」：
+  // 10月登記的班表 ($2,320 * 0.95 = $2,204) 預設為「下個月 (11/10) 才領的錢」，不會誤當成 10 月現在能花的錢！
+  const dashNextPay = repullRes.data.dashboard.survival;
+  assert.equal(dashNextPay.timeMapping.mappingMode, 'NEXT_MONTH_PAY');
+  assert.equal(dashNextPay.timeMapping.currentCycle.earnedShiftMonth, '2026-09');
+  assert.equal(dashNextPay.timeMapping.currentCycle.effectiveIncome, 0);
+  assert.equal(dashNextPay.timeMapping.upcomingCycle.workMonth, '2026-10');
+  assert.equal(dashNextPay.timeMapping.upcomingCycle.paydayDate, '2026-11-10');
+  assert.equal(dashNextPay.timeMapping.upcomingCycle.currMonthShift.estimatedNetPay, 2204);
+
+  // 當使用者設定目前 10 月手頭實際可用預算 ($20,000) 時，現在能花的錢為 $20,000，同時下個月 11/10 預估仍保留 $2,204
+  const setCurBudgetRes = await handleApiRequest('POST', '/api/shift/sync', {
+    manualNetSalary: 20000,
+    mappingMode: 'NEXT_MONTH_PAY',
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+  assert.equal(setCurBudgetRes.data.dashboard.survival.budget.effectiveIncome, 20000);
+  assert.equal(setCurBudgetRes.data.dashboard.survival.timeMapping.upcomingCycle.currMonthShift.estimatedNetPay, 2204);
+
+  // 若切換為「當月抵用制 (SAME_MONTH_PAY)」，則直接拿 10 月班表 ($2,204) 作為現在預算
+  const sameMonthRes = await handleApiRequest('POST', '/api/shift/sync', {
+    mappingMode: 'SAME_MONTH_PAY',
+    clearManualSalary: true,
+    recalculateOnly: true,
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+  assert.equal(sameMonthRes.data.dashboard.survival.budget.effectiveIncome, 2204);
 });
 
 

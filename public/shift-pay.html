@@ -1271,8 +1271,18 @@ function renderDashboard() {
 
   $('#monthLabel').textContent = `${viewY} 年 ${viewM} 月`;
 
-  // 1. 排班頁精簡版 Dashboard
-  $('#schedDashLabel').textContent = `${viewM} 月預估總薪資`;
+  // 1. 排班頁精簡版 Dashboard（含現實時間發薪對照提示）
+  const realNow = new Date();
+  const realYmIdx = realNow.getFullYear() * 12 + (realNow.getMonth() + 1);
+  const viewYmIdx = viewY * 12 + viewM;
+  const nextPayMonth = viewM === 12 ? 1 : viewM + 1;
+  let payTimeHint = `⏳ 預計 ${nextPayMonth} 月發薪入帳`;
+  if (viewYmIdx === realYmIdx) {
+    payTimeHint = `⏳ 本月上班累積中 ➔ 下月 (${nextPayMonth}月) 發薪`;
+  } else if (viewYmIdx === realYmIdx - 1) {
+    payTimeHint = `✅ 上月工時 ➔ 本月 (${realNow.getMonth() + 1}月) 發薪花用中`;
+  }
+  $('#schedDashLabel').textContent = `${viewM} 月預估總薪資（${payTimeHint}）`;
   animateNumber($('#schedTotal'), c.total);
   $('#schedQuickMeta').textContent = `正常 ${fmtHours(c.nMin)}h (${money(c.normalPay)}) · 加班 ${c.oMin}分 (${money(c.otPay)}) · 共 ${c.days.length} 天`;
 
