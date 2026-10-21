@@ -6,9 +6,175 @@ try {
 } catch (_) {}
 const { processBankNotification } = require('./reconciliationEngine');
 
+const IMAP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatImapDate(dt) {
+  const d = String(dt.getDate()).padStart(2, '0');
+  const m = IMAP_MONTHS[dt.getMonth()];
+  const y = dt.getFullYear();
+  return `${d}-${m}-${y}`;
+}
+
+function base64ToUtf8(b64) {
+  const clean = String(b64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+  if (!clean) return '';
+  try {
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(clean, 'base64').toString('utf8');
+    }
+    if (typeof atob === 'function' && typeof TextDecoder !== 'undefined') {
+      const bin = atob(clean);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+  } catch (_) {}
+  return '';
+}
+
+function decodeQuotedPrintableUtf8(qp) {
+  const softJoined = String(qp || '').replace(/=\r?\n/g, '');
+  try {
+    const bytes = [];
+    for (let i = 0; i < softJoined.length; i++) {
+      if (softJoined[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(softJoined.slice(i + 1, i + 3))) {
+        bytes.push(parseInt(softJoined.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        bytes.push(softJoined.charCodeAt(i));
+      }
+    }
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(bytes).toString('utf8');
+    }
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+    }
+  } catch (_) {}
+  return softJoined;
+}
+
+function decodeRfc2047Word(str) {
+  return String(str || '').replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, _charset, enc, payload) => {
+    if (String(enc).toUpperCase() === 'B') {
+      return base64ToUtf8(payload);
+    }
+    return decodeQuotedPrintableUtf8(String(payload).replace(/_/g, ' '));
+  });
+}
+
+function stripHtmlTags(html) {
+  return String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|tr|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /**
- * 輕量級原生 TLS IMAP 玉山通知信讀取模組 (免外部套件依賴)
- * 亦支援接收 Gmail Apps Script / iOS 捷徑 Webhook 直接轉發
+ * 將原始 MIME 信件內容解碼為乾淨純文字（支援 Base64、Quoted-Printable、Multipart 與 HTML 表格）
+ */
+function decodeEmailMimeToText(rawMime) {
+  const raw = String(rawMime || '');
+  if (!raw.trim()) return '';
+
+  const decodedHeaders = decodeRfc2047Word(raw);
+  const subjectMatch = decodedHeaders.match(/^Subject:\s*(.+)$/im);
+  const subject = subjectMatch ? subjectMatch[1].trim() : '';
+
+  const decodedParts = [];
+  if (subject) decodedParts.push(subject);
+
+  const b64Blocks = raw.match(/(?:^[A-Za-z0-9+/]{40,76}\r?\n)+(?:[A-Za-z0-9+/=]{4,76})?/gm) || [];
+  for (const blk of b64Blocks) {
+    const txt = base64ToUtf8(blk);
+    if (txt && /[\u4e00-\u9fa5]|NT\$|TWD|消費|刷卡|扣款|玉山/.test(txt)) {
+      decodedParts.push(stripHtmlTags(txt));
+    }
+  }
+
+  if (/=[0-9A-F]{2}=[0-9A-F]{2}=[0-9A-F]{2}/i.test(raw)) {
+    const qpTxt = decodeQuotedPrintableUtf8(raw);
+    decodedParts.push(stripHtmlTags(qpTxt));
+  }
+
+  if (decodedParts.length <= 1) {
+    decodedParts.push(stripHtmlTags(decodedHeaders));
+  }
+
+  return decodedParts.join('\n').trim();
+}
+
+function isBankTransactionEmailText(text) {
+  const t = String(text || '');
+  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳/i.test(t);
+  const hasAmount = /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(t);
+  return hasBankOrCard && hasAmount;
+}
+
+function buildGoogleAppsScriptCode(webhookUrl) {
+  const targetUrl = webhookUrl || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook';
+  return `// ============================================================================
+// 🛡️ 防破產記帳系統 — Gmail 刷卡通知 24 小時雲端全自動偵測腳本 (Google Apps Script)
+// 設定步驟（只需設定一次，終身全自動，不需開電腦、不需手動貼上）：
+// 1. 前往 https://script.google.com 新增專案，貼上此程式碼並按 Ctrl+S 儲存
+// 2. 點選左側「觸發條件 (鬧鐘圖示)」➔「+ 新增觸發條件」
+//    - 執行函式：autoSyncCreditCardNotifications
+//    - 時間驅動 ➔ 分鐘計時器 ➔ 每分鐘 (或每 5 分鐘) ➔ 儲存
+// ============================================================================
+
+const WEBHOOK_URL = "${targetUrl}";
+
+function autoSyncCreditCardNotifications() {
+  const props = PropertiesService.getScriptProperties();
+  const syncedIds = JSON.parse(props.getProperty("SYNCED_MSG_IDS") || "[]");
+  const syncedSet = new Set(syncedIds);
+  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 薪資入帳)';
+  const threads = GmailApp.search(query, 0, 15);
+  let newSynced = false;
+
+  for (const thread of threads) {
+    for (const msg of thread.getMessages()) {
+      const msgId = msg.getId();
+      if (syncedSet.has(msgId)) continue;
+      const subject = msg.getSubject() || "";
+      const plainBody = msg.getPlainBody() || msg.getBody().replace(/<[^>]+>/g, " ");
+      const fullText = "【" + subject + "】\\n" + plainBody;
+      try {
+        UrlFetchApp.fetch(WEBHOOK_URL, {
+          method: "post",
+          contentType: "application/json",
+          payload: JSON.stringify({
+            source: "gmail_gas_cloud_auto",
+            emailUid: msgId,
+            timestamp: msg.getDate().toISOString(),
+            text: fullText
+          }),
+          muteHttpExceptions: true
+        });
+        syncedSet.add(msgId);
+        newSynced = true;
+      } catch (err) {}
+    }
+  }
+  if (newSynced) {
+    props.setProperty("SYNCED_MSG_IDS", JSON.stringify(Array.from(syncedSet).slice(-200)));
+  }
+}`;
+}
+
+/**
+ * 原生 TLS IMAP 玉山與信用卡通知信全自動掃描與對帳引擎 (免外部套件依賴)
  */
 async function pollEsunEmailsViaImap(db) {
   const settings = db.prepare('SELECT gmail_user, gmail_app_password FROM user_settings WHERE id = 1').get();
@@ -16,7 +182,9 @@ async function pollEsunEmailsViaImap(db) {
     return {
       ok: false,
       mode: 'NOT_CONFIGURED',
-      message: '尚未設定 Gmail 帳號與應用程式密碼（App Password）。您可於設定分頁填入，或直接使用 iOS 捷徑 Webhook / 介面手動貼上測試框。'
+      processedCount: 0,
+      newTransactions: [],
+      message: '尚未設定 Gmail 帳號與 16 碼應用程式密碼。您可填入設定開啟本機背景每分鐘自動掃描，或複製下方 Google Apps Script / iOS 捷徑開啟 24h 雲端全自動偵測。'
     };
   }
 
@@ -24,36 +192,116 @@ async function pollEsunEmailsViaImap(db) {
     return {
       ok: true,
       mode: 'CLOUD_WEBHOOK_READY',
-      message: '☁️ 目前運行於 Cloudflare 雲端環境，已儲存您的 Gmail 設定！雲端模式建議搭配上方 HTTPS Webhook 網址由 iOS 捷徑或 Google Apps Script 即時轉發玉山通知信。'
+      processedCount: 0,
+      newTransactions: [],
+      message: '☁️ 目前運行於 Cloudflare 雲端環境，已就緒接收自動推播！請搭配「Google Apps Script 雲端自動轉發」或「手機刷卡推播自動化」即可 24 小時全自動入帳。'
     };
   }
+
+  const cleanPass = String(settings.gmail_app_password).replace(/\s+/g, '');
 
   return new Promise(resolve => {
     try {
       const socket = tls.connect({ host: 'imap.gmail.com', port: 993, rejectUnauthorized: true });
       let buffer = '';
       let step = 0;
+      const processedResults = [];
 
       const timeout = setTimeout(() => {
         socket.destroy();
-        resolve({ ok: false, mode: 'TIMEOUT', message: 'Gmail IMAP 連線逾時，請確認網路與應用程式密碼。' });
-      }, 8000);
+        resolve({
+          ok: false,
+          mode: 'TIMEOUT',
+          processedCount: processedResults.length,
+          newTransactions: processedResults,
+          message: 'Gmail IMAP 連線逾時，請確認網路與 16 碼應用程式密碼。'
+        });
+      }, 12000);
 
       socket.on('data', chunk => {
         buffer += chunk.toString('utf8');
-        if (step === 0 && buffer.includes('OK')) {
+
+        if (step === 0 && /^\* OK/m.test(buffer)) {
           step = 1;
           buffer = '';
-          socket.write(`A1 LOGIN "${settings.gmail_user}" "${settings.gmail_app_password}"\r\n`);
-        } else if (step === 1 && buffer.includes('A1 ')) {
+          socket.write(`A1 LOGIN "${settings.gmail_user}" "${cleanPass}"\r\n`);
+        } else if (step === 1 && /^A1 (OK|NO|BAD)/m.test(buffer)) {
+          if (!/^A1 OK/m.test(buffer)) {
+            clearTimeout(timeout);
+            socket.write('A9 LOGOUT\r\n');
+            socket.end();
+            return resolve({
+              ok: false,
+              mode: 'AUTH_FAILED',
+              processedCount: 0,
+              newTransactions: [],
+              message: '❌ Gmail IMAP 登入失敗，請確認已開啟 Google 兩步驟驗證並填入 16 碼「應用程式密碼」。'
+            });
+          }
+          step = 2;
+          buffer = '';
+          socket.write('A2 SELECT INBOX\r\n');
+        } else if (step === 2 && /^A2 (OK|NO|BAD)/m.test(buffer)) {
+          step = 3;
+          buffer = '';
+          const sinceDt = new Date(Date.now() - 7 * 86400000);
+          socket.write(`A3 SEARCH SINCE ${formatImapDate(sinceDt)}\r\n`);
+        } else if (step === 3 && /^A3 (OK|NO|BAD)/m.test(buffer)) {
+          const searchMatch = buffer.match(/^\* SEARCH(?: (.+))?\r?$/m);
+          const seqNums = searchMatch && searchMatch[1]
+            ? searchMatch[1].trim().split(/\s+/).filter(Boolean).slice(-12)
+            : [];
+
+          buffer = '';
+          if (seqNums.length === 0) {
+            clearTimeout(timeout);
+            socket.write('A5 LOGOUT\r\n');
+            socket.end();
+            return resolve({
+              ok: true,
+              mode: 'IMAP_SYNCED',
+              processedCount: 0,
+              newTransactions: [],
+              message: '✅ 自動掃描完成：最近 7 天信箱內尚無新的刷卡或銀行通知信。'
+            });
+          }
+
+          step = 4;
+          const fetchSet = seqNums.join(',');
+          socket.write(`A4 FETCH ${fetchSet} (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODY.PEEK[TEXT])\r\n`);
+        } else if (step === 4 && /^A4 (OK|NO|BAD)/m.test(buffer)) {
           clearTimeout(timeout);
-          const success = buffer.includes('A1 OK');
-          socket.write('A2 LOGOUT\r\n');
+          const rawResponse = buffer;
+          buffer = '';
+          socket.write('A5 LOGOUT\r\n');
           socket.end();
+
+          const msgBlocks = rawResponse.split(/^\* \d+ FETCH /m).slice(1);
+          for (const block of msgBlocks) {
+            const uidMatch = block.match(/UID\s+(\d+)/i);
+            const uid = uidMatch ? uidMatch[1] : null;
+            const decodedText = decodeEmailMimeToText(block);
+            if (!isBankTransactionEmailText(decodedText)) continue;
+
+            try {
+              const res = processBankNotification(db, decodedText, {
+                source: 'gmail_imap_auto',
+                emailUid: uid || undefined
+              });
+              if (res && res.resultType !== 'DEBOUNCE_IGNORED') {
+                processedResults.push(res);
+              }
+            } catch (_) {}
+          }
+
           resolve({
-            ok: success,
-            mode: 'IMAP_CONNECTED',
-            message: success ? '✅ 成功透過 IMAP 驗證 Gmail 信箱並檢查玉山銀行通知信！' : '❌ Gmail IMAP 登入失敗，請確認已開啟兩步驟驗證並使用 16 碼應用程式密碼。'
+            ok: true,
+            mode: 'IMAP_SYNCED',
+            processedCount: processedResults.length,
+            newTransactions: processedResults,
+            message: processedResults.length > 0
+              ? `⚡ 全自動偵測成功！已從 Gmail 自動抓取並寫入 ${processedResults.length} 筆最新刷卡/入帳紀錄！`
+              : '✅ Gmail 信箱自動掃描完成（所有刷卡通知皆已同步，無重複扣款）。'
           });
         }
       });
@@ -63,19 +311,26 @@ async function pollEsunEmailsViaImap(db) {
         resolve({
           ok: true,
           mode: 'CLOUD_WEBHOOK_READY',
-          message: `☁️ 雲端環境不直接開放 TCP 993 埠 (${err.message})，已儲存帳號設定，請使用此頁顯示的 HTTPS Webhook 網址搭配 iOS 捷徑或 Gmail 自動轉發！`
+          processedCount: 0,
+          newTransactions: [],
+          message: `☁️ 雲端模式已儲存設定 (${err.message})，請搭配 Google Apps Script 或手機推播自動化即時入帳！`
         });
       });
-    } catch (err) {
+    } catch (_) {
       resolve({
         ok: true,
         mode: 'CLOUD_WEBHOOK_READY',
-        message: '☁️ 目前運行於 Cloudflare 雲端環境，請使用上方 HTTPS Webhook 網址搭配 iOS 捷徑即時推送玉山通知！'
+        processedCount: 0,
+        newTransactions: [],
+        message: '☁️ 目前運行於雲端環境，請使用自動轉發腳本或手機推播自動化即時推送刷卡通知！'
       });
     }
   });
 }
 
 module.exports = {
-  pollEsunEmailsViaImap
+  pollEsunEmailsViaImap,
+  decodeEmailMimeToText,
+  isBankTransactionEmailText,
+  buildGoogleAppsScriptCode
 };

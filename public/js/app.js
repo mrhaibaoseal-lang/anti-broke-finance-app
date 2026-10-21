@@ -10,6 +10,10 @@ const fmtMoney = n => '$' + Number(n || 0).toLocaleString();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const NOTIFICATION_PRESETS = {
+  credit_ubear: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return `【消費通知】您的玉山Ｕ Bear信用卡(末四碼1234)於 ${today} 14:25 在「連加*麥當勞」一般消費 新臺幣 165.00 元，實際請款金額以帳單為準。`;
+  },
   maixiang_auth: () => {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
     return `【玉山銀行】您的玉山簽帳金融卡於 ${today} 在 統一超商 刷卡消費授權 NT$10 元（麥香紅茶圈存）。`;
@@ -493,17 +497,159 @@ function openShiftModal() {
   $('#modalShiftSync')?.classList.remove('hidden');
 }
 
+function showAutoToast(message) {
+  let bar = document.getElementById('autoSyncToastBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'autoSyncToastBar';
+    bar.className = 'fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[92%] rounded-2xl bg-slate-900/95 text-white px-4 py-2.5 text-xs font-semibold shadow-xl border border-slate-700 transition-opacity duration-300';
+    document.body.appendChild(bar);
+  }
+  bar.textContent = message;
+  bar.style.opacity = '1';
+  clearTimeout(bar._hideTimer);
+  bar._hideTimer = setTimeout(() => {
+    bar.style.opacity = '0';
+  }, 3600);
+}
+
+function readLocalShiftPayBridgePayload() {
+  try {
+    const bridgeRaw = localStorage.getItem('shiftpay.v2.bridge');
+    if (bridgeRaw) {
+      const parsed = JSON.parse(bridgeRaw);
+      if (parsed && (parsed.state || parsed.shifts)) return parsed;
+    }
+    const v1Raw = localStorage.getItem('shiftpay.v1');
+    if (v1Raw) {
+      const parsed = JSON.parse(v1Raw);
+      if (parsed && parsed.shifts) return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function autoSyncShiftFromBridge(explicitPayload = null, showNotice = false) {
+  try {
+    const payload = explicitPayload || readLocalShiftPayBridgePayload();
+    if (!payload) return null;
+    const res = await apiCall('/api/shift/sync', 'POST', {
+      rawJsonPayload: payload,
+      autoSync: !showNotice
+    });
+    if (res && res.dashboard) {
+      renderDashboard(res.dashboard);
+      if (showNotice) {
+        showAutoToast(`📅 ${res.message || '已自動同步「打工薪水帳 V2」最新排班與薪資！'}`);
+      }
+    }
+    return res;
+  } catch (_) {
+    return null;
+  }
+}
+
+let lastAutoClipboardText = '';
+async function checkClipboardForBankNotification() {
+  try {
+    if (localStorage.getItem('anti_broke_auto_clipboard') === '0') return;
+    if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') return;
+    const clip = (await navigator.clipboard.readText() || '').trim();
+    if (!clip || clip.length < 12 || clip.length > 1500 || clip === lastAutoClipboardText) return;
+    const isSwipeNotif = /玉山|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|商店請款|薪資入帳/.test(clip)
+      && /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(clip);
+    if (!isSwipeNotif) return;
+
+    lastAutoClipboardText = clip;
+    const res = await apiCall('/api/notifications/webhook', 'POST', {
+      source: 'clipboard_auto_sense',
+      text: clip
+    });
+    if (res && res.dashboard) {
+      renderDashboard(res.dashboard);
+      if (res.result && res.result.resultType !== 'DEBOUNCE_IGNORED') {
+        showAutoToast(`⚡ 自動偵測到刷卡通知：${res.result.parsed?.normalizedMerchant || ''} $${res.result.parsed?.amount || ''}`);
+      }
+    }
+  } catch (_) {}
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const whDisplay = $('#webhookUrlDisplay');
-  if (whDisplay && window.location?.origin) {
-    whDisplay.textContent = `POST ${window.location.origin}/api/notifications/webhook`;
+  const webhookUrl = window.location?.origin
+    ? `${window.location.origin}/api/notifications/webhook`
+    : 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook';
+  if (whDisplay) {
+    whDisplay.textContent = `POST ${webhookUrl}`;
   }
+
+  const chkClip = $('#chkAutoClipboard');
+  if (chkClip) {
+    chkClip.checked = localStorage.getItem('anti_broke_auto_clipboard') !== '0';
+    chkClip.addEventListener('change', () => {
+      localStorage.setItem('anti_broke_auto_clipboard', chkClip.checked ? '1' : '0');
+    });
+  }
+
   try {
-    const data = await apiCall('/api/dashboard');
+    const localShift = readLocalShiftPayBridgePayload();
+    const data = await apiCall('/api/dashboard', localShift ? 'POST' : 'GET', localShift ? { autoShiftState: localShift } : null);
     renderDashboard(data);
   } catch (err) {
     console.error(err);
   }
+
+  // 監聽「打工薪水帳 V2」跨分頁 / 內嵌視窗即時同步事件 (免手動輸入 JSON)
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('anti_broke_shift_sync');
+      bc.addEventListener('message', ev => {
+        if (ev.data && ev.data.type === 'SHIFT_STATE_UPDATED' && ev.data.payload) {
+          autoSyncShiftFromBridge(ev.data.payload, true);
+        }
+      });
+    }
+  } catch (_) {}
+
+  window.addEventListener('message', ev => {
+    if (ev.data && ev.data.type === 'SHIFT_STATE_UPDATED' && ev.data.payload) {
+      autoSyncShiftFromBridge(ev.data.payload, true);
+    }
+  });
+
+  window.addEventListener('storage', ev => {
+    if (ev.key === 'shiftpay.v1' || ev.key === 'shiftpay.v2.bridge') {
+      autoSyncShiftFromBridge(null, true);
+    }
+  });
+
+  // 定期 15 秒即時同步雲端與本機自動入帳的刷卡紀錄與排班薪資
+  setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      const prevTopTxId = dashboardState?.transactions?.[0]?.id || 0;
+      const prevSpent = dashboardState?.survival?.budget?.totalSpent || 0;
+      const prevIncome = dashboardState?.survival?.budget?.effectiveIncome || 0;
+      const latest = await apiCall('/api/dashboard');
+      const newTopTxId = latest?.transactions?.[0]?.id || 0;
+      const newSpent = latest?.survival?.budget?.totalSpent || 0;
+      const newIncome = latest?.survival?.budget?.effectiveIncome || 0;
+      if (newTopTxId !== prevTopTxId || newSpent !== prevSpent || newIncome !== prevIncome) {
+        renderDashboard(latest);
+        if (newTopTxId > prevTopTxId && latest.transactions?.[0]) {
+          const topTx = latest.transactions[0];
+          showAutoToast(`💳 自動偵測新刷卡：${topTx.normalized_merchant} $${topTx.effective_amount}`);
+        } else if (newIncome !== prevIncome) {
+          showAutoToast(`📅 薪資預算已自動同步更新為 $${newIncome.toLocaleString()}`);
+        }
+      }
+    } catch (_) {}
+  }, 15000);
+
+  window.addEventListener('focus', () => {
+    checkClipboardForBankNotification();
+    autoSyncShiftFromBridge(null, false);
+  });
 
   $$('[data-nav-tab]').forEach(btn => {
     btn.addEventListener('click', () => switchMainTab(btn.dataset.navTab));
@@ -533,10 +679,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   const openNotif = () => $('#modalNotifParser')?.classList.remove('hidden');
   $('#btnOpenNotifModal')?.addEventListener('click', openNotif);
   $('#btnOpenNotifFromList')?.addEventListener('click', openNotif);
+  $('#btnHomeAutoSwipeCenter')?.addEventListener('click', openNotif);
 
   $('#btnOpenShiftSync')?.addEventListener('click', openShiftModal);
   $('#btnOpenShiftSyncHome')?.addEventListener('click', openShiftModal);
   $('#btnOpenShiftSyncCard')?.addEventListener('click', openShiftModal);
+
+  const openEmbeddedShift = () => {
+    $('#modalShiftSync')?.classList.add('hidden');
+    const modal = $('#modalEmbeddedShiftApp');
+    const iframe = $('#shiftAppIframe');
+    if (iframe && (!iframe.src || iframe.src === 'about:blank')) {
+      iframe.src = '/shift-pay';
+    }
+    modal?.classList.remove('hidden');
+  };
+  $('#btnHomeOpenShiftEmbed')?.addEventListener('click', openEmbeddedShift);
+  $('#btnOpenEmbeddedShiftApp')?.addEventListener('click', openEmbeddedShift);
 
   $('#btnOpenBalanceSync')?.addEventListener('click', () => $('#modalBalanceSync')?.classList.remove('hidden'));
   $('#btnOpenFixedModal')?.addEventListener('click', () => $('#modalFixedExpense')?.classList.remove('hidden'));
@@ -803,7 +962,76 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('#btnPollGmail')?.addEventListener('click', async () => {
     const res = await apiCall('/api/notifications/gmail-poll', 'POST', {});
-    alert(res.imap.message);
+    renderDashboard(res.dashboard);
+    showAutoToast(res.imap.message);
+  });
+
+  $('#btnPollGmailNow')?.addEventListener('click', async () => {
+    const btn = $('#btnPollGmailNow');
+    if (btn) btn.textContent = '⏳ 正在掃描 Gmail...';
+    try {
+      const res = await apiCall('/api/notifications/gmail-poll', 'POST', {});
+      renderDashboard(res.dashboard);
+      const box = $('#notifResultBox');
+      if (box) {
+        box.classList.remove('hidden');
+        box.className = 'rounded-2xl p-3.5 text-xs bg-indigo-50 border border-indigo-200 text-indigo-800 font-semibold';
+        box.textContent = res.imap.message;
+      }
+      showAutoToast(res.imap.message);
+    } finally {
+      if (btn) btn.textContent = '🔄 立即掃描 Gmail 刷卡信';
+    }
+  });
+
+  $('#btnCopyWebhookUrl')?.addEventListener('click', async () => {
+    const url = window.location?.origin
+      ? `${window.location.origin}/api/notifications/webhook`
+      : 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook';
+    try {
+      await navigator.clipboard.writeText(url);
+      showAutoToast('✅ 已複製自動入帳 Webhook 網址！可貼至 iOS 捷徑自動化');
+    } catch (_) {
+      prompt('請複製以下 Webhook 網址：', url);
+    }
+  });
+
+  $('#btnCopyGasScript')?.addEventListener('click', async () => {
+    const code = dashboardState?.automation?.gasScriptCode || '';
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      showAutoToast('✅ 已複製 Google 雲端 24h 自動收信腳本！請貼至 script.google.com');
+    } catch (_) {
+      alert('複製失敗，請至設定查看');
+    }
+  });
+
+  $('#btnOpenEmbeddedShiftApp')?.addEventListener('click', () => {
+    $('#modalShiftSync')?.classList.add('hidden');
+    const modal = $('#modalEmbeddedShiftApp');
+    const iframe = $('#shiftAppIframe');
+    if (iframe && (!iframe.src || iframe.src === 'about:blank')) {
+      iframe.src = '/shift-pay';
+    }
+    modal?.classList.remove('hidden');
+  });
+
+  $('#btnCloseEmbeddedShiftApp')?.addEventListener('click', async () => {
+    $('#modalEmbeddedShiftApp')?.classList.add('hidden');
+    await autoSyncShiftFromBridge(null, true);
+  });
+
+  $('#btnAutoPullShiftNow')?.addEventListener('click', async () => {
+    const res = await autoSyncShiftFromBridge(null, true);
+    if (res) {
+      $('#modalShiftSync')?.classList.add('hidden');
+    } else {
+      const apiRes = await apiCall('/api/shift/sync', 'POST', {});
+      renderDashboard(apiRes.dashboard);
+      showAutoToast(apiRes.message || '✅ 已重新同步班表薪資！');
+      $('#modalShiftSync')?.classList.add('hidden');
+    }
   });
 
   $('#btnResetDemo')?.addEventListener('click', async () => {

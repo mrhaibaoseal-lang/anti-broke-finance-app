@@ -77,14 +77,23 @@ async function handleCloudflareApiRequest(request, env) {
     edgeDb = createDatabase({ engine: 'portable', seedDefaults: true });
   }
 
-  // 選擇最新版本的狀態快照（D1 雲端 vs 瀏覽器端 vs 首次啟動預設展示資料）
+  // 選擇最新版本的狀態快照（依據 updatedAt 時間戳與 version 綜合判定，確保雲端背景 Webhook 推播與班表同步永遠優先同步至前端）
   const d1Ver = Number(d1Snapshot?.version) || 0;
   const clientVer = Number(clientSnapshot?.version) || 0;
+  const d1Time = d1Snapshot?.updatedAt ? new Date(d1Snapshot.updatedAt).getTime() : 0;
+  const clientTime = clientSnapshot?.updatedAt ? new Date(clientSnapshot.updatedAt).getTime() : 0;
 
   if (d1Ver > 0 || clientVer > 0) {
-    const bestSnapshot = d1Ver >= clientVer ? d1Snapshot : clientSnapshot;
+    let bestSnapshot;
+    if (d1Snapshot && clientSnapshot) {
+      bestSnapshot = (d1Time >= clientTime || d1Ver >= clientVer) ? d1Snapshot : clientSnapshot;
+    } else {
+      bestSnapshot = d1Snapshot || clientSnapshot;
+    }
     const currentVer = edgeInitialized ? (Number(edgeDb.version) || 0) : 0;
-    if (!edgeInitialized || bestSnapshot.version >= currentVer) {
+    const currentTime = edgeInitialized && edgeDb.updatedAt ? new Date(edgeDb.updatedAt).getTime() : 0;
+    const bestTime = bestSnapshot?.updatedAt ? new Date(bestSnapshot.updatedAt).getTime() : 0;
+    if (!edgeInitialized || bestTime >= currentTime || bestSnapshot.version >= currentVer) {
       edgeDb.importSnapshot(bestSnapshot);
     }
     edgeInitialized = true;
@@ -95,6 +104,10 @@ async function handleCloudflareApiRequest(request, env) {
 
   const versionBefore = edgeDb.version;
   const result = await handleApiRequest(method, pathname, body, urlObj.searchParams, { db: edgeDb });
+  if (edgeDb.version !== versionBefore) {
+    edgeDb.version = Math.max(d1Ver, clientVer, Number(edgeDb.version) || 0) + 1;
+    edgeDb.updatedAt = new Date().toISOString();
+  }
   const latestSnapshot = edgeDb.exportSnapshot();
 
   if (edgeDb.version !== versionBefore || (clientVer > d1Ver && d1)) {

@@ -36,10 +36,20 @@ function normalizeMerchant(rawMerchant) {
     /^NEWEBPAY[\*\-\s_]*/,
     /^全支付[\*\-\s_]*/,
     /^PXPAY[\*\-\s_]*/,
+    /^全盈支付[\*\-\s_]*/,
+    /^全盈[\*\-\s_]*/,
     /^拍付[\*\-\s_]*/,
     /^PI錢包[\*\-\s_]*/,
     /^一卡通[\*\-\s_]*/,
-    /^IPASS[\*\-\s_]*/
+    /^IPASS[\*\-\s_]*/,
+    /^悠遊付[\*\-\s_]*/,
+    /^EASY\s*WALLET[\*\-\s_]*/,
+    /^台灣PAY[\*\-\s_]*/,
+    /^TWQR[\*\-\s_]*/,
+    /^APPLE\s*PAY[\*\-\s_]*/,
+    /^GOOGLE\s*PAY[\*\-\s_]*/,
+    /^SAMSUNG\s*PAY[\*\-\s_]*/,
+    /^玉山WALLET[\*\-\s_]*/
   ];
 
   let changed = true;
@@ -57,8 +67,14 @@ function normalizeMerchant(rawMerchant) {
   if (/7[\-\s]*11|7[\-\s]*ELEVEN|統一超商/.test(s)) {
     return '7-ELEVEN';
   }
-  if (/全家便利|全家超商|FAMILY\s*MART|FAMILYMART/.test(s)) {
+  if (/全家便利|全家超商|FAMILY\s*MART|FAMILYMART|^全家$/.test(s)) {
     return '全家便利商店';
+  }
+  if (/萊爾富|HI[\-\s]*LIFE/.test(s)) {
+    return '萊爾富';
+  }
+  if (/OK超商|OK\s*MART|來來超商/.test(s)) {
+    return 'OK超商';
   }
   if (/台灣中油|中國石油|中油/.test(s)) {
     return '台灣中油';
@@ -74,6 +90,15 @@ function normalizeMerchant(rawMerchant) {
   }
   if (/NETFLIX/.test(s)) {
     return 'NETFLIX';
+  }
+  if (/MCDONALD|麥當勞/.test(s)) {
+    return '麥當勞';
+  }
+  if (/STARBUCKS|星巴克|悠旅生活/.test(s)) {
+    return '星巴克';
+  }
+  if (/SHOPEE|蝦皮/.test(s)) {
+    return '蝦皮購物';
   }
 
   // 移除尾端分店編號干擾（保留主要店名關鍵字）
@@ -165,15 +190,23 @@ function normalizeDateToken(rawDateStr, defaultYear) {
 }
 
 /**
- * 解析玉山銀行通知文字（支援 Email、Wallet 推播、簡訊、iOS 捷徑文字）
+ * 解析玉山銀行與台灣常見信用卡/簽帳金融卡通知文字（支援 Email、Wallet 推播、LINE 通知、簡訊、iOS/Android 捷徑文字）
  * 區分：
- *  - CHANNEL_A_AUTH (第 1 次通知：簽帳金融卡消費 / 授權 / 圈存)
- *  - CHANNEL_B_SETTLE (第 2 次通知：帳戶扣款 / 簽帳卡消費扣款 / 請款)
+ *  - CHANNEL_A_AUTH (第 1 次通知：信用卡刷卡 / 簽帳金融卡消費 / 授權 / 圈存)
+ *  - CHANNEL_B_SETTLE (第 2 次通知：帳戶扣款 / 簽帳卡消費扣款 / 商店請款 / 帳單請款)
  *  - SALARY_IN (薪資入帳通知)
  *  - REFUND (刷退 / 取消授權 / 解圈退回)
  */
 function parseEsunNotification(rawText, options = {}) {
-  const cleanText = toHalfWidth(String(rawText || '')).trim();
+  const cleanText = toHalfWidth(String(rawText || ''))
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\r\n/g, '\n')
+    .trim();
+
   if (!cleanText) {
     throw new Error('通知文字不可為空');
   }
@@ -181,36 +214,63 @@ function parseEsunNotification(rawText, options = {}) {
   const refDateStr = options.referenceDate || new Date().toISOString().slice(0, 10);
   const defaultYear = Number(refDateStr.slice(0, 4)) || new Date().getFullYear();
 
+  // 剔除銀行推播/信件末尾常見的「實際請款金額以帳單/商店請款為準」免責聲明，避免將通道 A 刷卡誤判為通道 B 請款
+  const textWithoutDisclaimer = cleanText
+    .replace(/(?:實際|最終)?(?:請款|扣款|入帳)金額以(?:帳單|特約商店|商店請款|實際請款|銀行帳單)[^。；\n]*/g, '')
+    .replace(/本筆交易為(?:授權|圈存)[^。；\n]*待(?:特約)?商店請款[^。；\n]*/g, '')
+    .replace(/待(?:特約)?商店請款後(?:始進行)?扣款/g, '')
+    .replace(/尚未請款|未請款/g, '');
+
   // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
   let channelType = 'CHANNEL_A_AUTH';
-  if (/薪資入帳|薪水入帳|薪資轉帳|薪轉入帳|發薪入帳/.test(cleanText)) {
+  if (/薪資入帳|薪水入帳|薪資轉帳|薪轉入帳|發薪入帳|薪資發放/.test(textWithoutDisclaimer)) {
     channelType = 'SALARY_IN';
-  } else if (/刷退|退貨|取消授權|解圈退回|沖銷入帳|退單/.test(cleanText)) {
+  } else if (/刷退|退貨|取消授權|解圈退回|沖銷入帳|退單|取消交易|退款/.test(textWithoutDisclaimer)) {
     channelType = 'REFUND';
-  } else if (/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際扣款|請款/.test(cleanText)) {
+  } else if (/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_B_SETTLE';
-  } else if (/簽帳金融卡消費|授權|刷卡|圈存|一般消費|消費通知/.test(cleanText)) {
+  } else if (/信用卡|簽帳金融卡|簽帳卡|玉山卡|授權|刷卡|圈存|一般消費|消費通知|消費金額|特店名稱|新增消費/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_A_AUTH';
+  } else if (/請款/.test(textWithoutDisclaimer)) {
+    channelType = 'CHANNEL_B_SETTLE';
   }
 
-  // 2. 擷取金額 (優先匹配 NT$ / TWD / 新台幣 / $ 與「...元」，並以負向後行斷言排除日期的年份 2026/10/20)
+  // 1.5 辨識卡別 (CREDIT 信用卡 vs DEBIT 簽帳金融卡) 與卡號末四碼
+  const cardType = /簽帳金融卡|簽帳卡|DEBIT|圈存|帳戶扣款/.test(cleanText) ? 'DEBIT' : 'CREDIT';
+  let cardLast4 = null;
+  const last4Match = cleanText.match(/(?:末四碼|末4碼|卡號末四碼|卡號|\*)\s*([0-9]{4})(?!\d)/);
+  if (last4Match) cardLast4 = last4Match[1];
+
+  // 1.6 擷取通知內附帶的「可用餘額」（若有），並從金額匹配字串中移除餘額與卡號干擾
+  let reportedAvailableBalance = null;
+  const balMatch = cleanText.match(/(?:可用餘額|帳戶可用餘額|帳戶餘額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?/i);
+  if (balMatch && balMatch[1]) {
+    reportedAvailableBalance = parseInt(balMatch[1].replace(/,/g, ''), 10);
+  }
+
+  const textForAmount = cleanText
+    .replace(/(?:可用餘額|帳戶可用餘額|帳戶餘額|剩餘額度|信用額度)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*[0-9,]+(?:\.[0-9]+)?\s*元?/gi, ' ')
+    .replace(/(?:卡號)?(?:末四碼|末4碼)[：:\s(（]*[0-9]{4}[)）]?/g, ' ');
+
+  // 2. 擷取金額 (支援整數與 .00 小數格式，優先匹配消費/扣款/金額標籤與 NT$/TWD/新臺幣，並排除日期年份)
   let amount = 0;
   const amountPatterns = [
-    /(?:NT\$|TWD|新台幣|臺幣|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?![0-9]*[\/\-年])/i,
-    /([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\s*元/,
-    /(?:金額|消費|扣款|入帳|刷退)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?![0-9]*[\/\-年月])/i
+    /(?:消費金額|刷卡金額|交易金額|實際請款扣款|請款扣款|實際扣款|扣款金額|請款金額|授權金額|入帳金額|刷退金額|金額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i,
+    /(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年:])/i,
+    /(?<![0-9.])([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?\s*元/,
+    /(?:消費|扣款|入帳|刷退|刷卡|授權)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i
   ];
   for (const pat of amountPatterns) {
-    const m = cleanText.match(pat);
+    const m = textForAmount.match(pat);
     if (m && m[1]) {
       amount = parseInt(m[1].replace(/,/g, ''), 10);
       break;
     }
   }
 
-  // 3. 擷取「原始消費日期（刷卡日）」與「通知/請款當日日期」
+  // 3. 擷取「原始消費日期（刷卡日）」、「通知/請款當日日期」與「精確刷卡時間 (HH:mm)」
   let originalTxDate = null;
-  const origDateMatch = cleanText.match(/(?:原始交易日|原交易日|原消費日|原始消費日|刷卡日|消費日期|交易日)[：:\s]*(\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?|\d{1,2}[\/\-月]\d{1,2}日?)/);
+  const origDateMatch = cleanText.match(/(?:原始交易日|原交易日|原消費日|原始消費日|刷卡日|消費日期|交易日期|交易日)[：:\s]*(\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?|\d{1,2}[\/\-月]\d{1,2}日?)/);
   if (origDateMatch) {
     originalTxDate = normalizeDateToken(origDateMatch[1], defaultYear);
   }
@@ -228,17 +288,25 @@ function parseEsunNotification(rawText, options = {}) {
     }
   }
 
+  let txTimeMinute = null;
+  const timeMatch = cleanText.match(/(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?/);
+  if (timeMatch) {
+    const parts = timeMatch[0].split(':');
+    txTimeMinute = `${String(parts[0]).padStart(2, '0')}:${String(parts[1]).padStart(2, '0')}`;
+  }
+
   // 4. 擷取授權碼 (若有)
   let authCode = null;
   const authMatch = cleanText.match(/(?:授權碼|Auth\s*Code)[：:\s]*([A-Z0-9]{4,8})/i);
   if (authMatch) authCode = authMatch[1].toUpperCase();
 
-  // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取商店標籤或於/在...消費結構)
+  // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取結構化欄位或於/在...消費結構)
+  const headerIgnoreRegex = /^(?:玉山銀行|玉山Wallet|玉山信用卡|玉山簽帳卡|簽帳金融卡|信用卡|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|一般消費)$/i;
   let rawMerchant = '未知商店';
   const quoteMatches = [...cleanText.matchAll(/[「『]([^」』]+)[」』]/g)];
   for (const qm of quoteMatches) {
     const candidate = qm[1].trim();
-    if (candidate && !/玉山銀行|玉山Wallet|簽帳金融卡|帳戶扣款|薪資入帳/.test(candidate)) {
+    if (candidate && !headerIgnoreRegex.test(candidate)) {
       rawMerchant = candidate;
       break;
     }
@@ -246,15 +314,15 @@ function parseEsunNotification(rawText, options = {}) {
 
   if (rawMerchant === '未知商店') {
     const merchantPatterns = [
-      /(?:商店名稱|特約商店|消費商店|請款商店|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新台幣|\$|\d+元|$))/i,
-      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新台幣)/i,
+      /(?:特店名稱|商店名稱|特約商店|消費商店|請款商店|交易地點|消費地點|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費金額|刷卡金額|交易金額|實際請款|一般消費|消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣|\$|\d+元|$))/i,
+      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:一般消費|刷卡消費|刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣)/i,
       /【([^】]+)】/
     ];
     for (const pat of merchantPatterns) {
       const m = cleanText.match(pat);
       if (m && m[1]) {
         const candidate = m[1].trim();
-        if (candidate && !/玉山銀行|玉山Wallet|簽帳金融卡|帳戶扣款|薪資入帳|^\d{4}/.test(candidate)) {
+        if (candidate && !headerIgnoreRegex.test(candidate) && !/^\d{4}/.test(candidate)) {
           rawMerchant = candidate;
           break;
         }
@@ -270,13 +338,17 @@ function parseEsunNotification(rawText, options = {}) {
 
   return {
     channelType,
+    cardType,
+    cardLast4,
     rawMerchant,
     normalizedMerchant,
     amount,
     txDate: originalTxDate || eventDate,
     originalTxDate, // null 代表通道 B 通知中未明確附帶原始刷卡日
     eventDate,
+    txTimeMinute,
     authCode,
+    reportedAvailableBalance,
     ...classification,
     rawText: cleanText
   };

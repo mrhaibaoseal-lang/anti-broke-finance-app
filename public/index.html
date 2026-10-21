@@ -11,7 +11,7 @@
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261021v4" />
 </head>
 <body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -122,25 +122,45 @@
         </button>
       </div>
 
-      <div class="grid grid-cols-3 gap-3">
-        <button id="btnOpenNotifModal" class="bento-card p-4 flex flex-col items-center gap-1.5 btn-press">
-          <div class="w-9 h-9 rounded-2xl bg-indigo-50 text-indigo-600 grid place-items-center text-sm">
-            <i class="fa-solid fa-envelope-open-text"></i>
+      <!-- ⚡ 新增：首頁全自動刷卡偵測 & 排班薪資自動連動中心卡片 -->
+      <div class="bento-card p-5 space-y-3.5 border border-indigo-100 bg-gradient-to-br from-white via-indigo-50/30 to-emerald-50/30">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span class="text-xs font-bold text-slate-900">全自動刷卡偵測 ＆ 薪資 App 即時連動</span>
           </div>
-          <span class="text-xs font-semibold text-slate-700">玉山通知記帳</span>
-        </button>
-        <button id="btnOpenBalanceSync" class="bento-card p-4 flex flex-col items-center gap-1.5 btn-press">
-          <div class="w-9 h-9 rounded-2xl bg-amber-50 text-amber-600 grid place-items-center text-sm">
-            <i class="fa-solid fa-scale-balanced"></i>
-          </div>
-          <span class="text-xs font-semibold text-slate-700">餘額校正</span>
-        </button>
-        <button id="btnOpenShiftSyncHome" class="bento-card p-4 flex flex-col items-center gap-1.5 btn-press">
-          <div class="w-9 h-9 rounded-2xl bg-emerald-50 text-emerald-600 grid place-items-center text-sm">
-            <i class="fa-solid fa-sliders"></i>
-          </div>
-          <span class="text-xs font-semibold text-slate-700">設定薪資</span>
-        </button>
+          <span class="px-2 py-0.5 rounded-full bg-emerald-100/80 text-emerald-800 text-[10px] font-bold">免手動輸入</span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <button type="button" id="btnHomeOpenShiftEmbed" class="btn-press rounded-2xl bg-emerald-600 text-white p-3 text-left space-y-1 shadow-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold"><i class="fa-solid fa-calendar-days mr-1"></i>開啟排班算薪水</span>
+              <span class="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-md">自動同步</span>
+            </div>
+            <div class="text-[11px] text-emerald-100 leading-tight">排班變動即自動重算預算，免貼 JSON</div>
+          </button>
+
+          <button type="button" id="btnHomeAutoSwipeCenter" class="btn-press rounded-2xl bg-indigo-600 text-white p-3 text-left space-y-1 shadow-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold"><i class="fa-solid fa-satellite-dish mr-1"></i>刷卡自動偵測</span>
+              <span class="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-md">精準防重</span>
+            </div>
+            <div class="text-[11px] text-indigo-100 leading-tight">自動攔截推播與 Gmail 刷卡信入帳</div>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 pt-0.5">
+          <button id="btnOpenNotifModal" class="btn-press py-2 px-2.5 rounded-xl bg-white border border-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1">
+            <i class="fa-solid fa-bolt text-indigo-600"></i> 自動化設定
+          </button>
+          <button id="btnOpenShiftSyncHome" class="btn-press py-2 px-2.5 rounded-xl bg-white border border-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1">
+            <i class="fa-solid fa-rotate text-emerald-600"></i> 薪資連動設定
+          </button>
+          <button id="btnOpenBalanceSync" class="btn-press py-2 px-2.5 rounded-xl bg-white border border-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1">
+            <i class="fa-solid fa-scale-balanced text-amber-600"></i> 餘額校正
+          </button>
+        </div>
       </div>
 
       <div class="bento-card p-5">
@@ -193,7 +213,7 @@
             <button data-tx-filter="UNKNOWN_GAP" class="btn-press shrink-0 px-3 py-1.5 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-600">🕳️ 黑洞</button>
           </div>
           <button id="btnOpenNotifFromList" class="btn-press shrink-0 px-3 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-semibold">
-            + 貼通知
+            ⚡ 自動偵測
           </button>
         </div>
         <div id="txListContainer" class="space-y-3"></div>
@@ -210,12 +230,12 @@
               <i class="fa-solid fa-sack-dollar"></i>
             </span>
             <div>
-              <h2 class="text-base font-semibold text-slate-900">薪資與週期設定</h2>
-              <p id="actualSalaryNote" class="text-xs text-slate-400">可隨時調整薪資與發薪日</p>
+              <h2 class="text-base font-semibold text-slate-900">薪資 App 自動連動與週期</h2>
+              <p id="actualSalaryNote" class="text-xs text-slate-400">與打工薪水帳 V2 自動同步</p>
             </div>
           </div>
           <button id="btnOpenShiftSyncCard" class="btn-press px-3 py-1.5 rounded-full bg-emerald-600 text-white text-xs font-semibold">
-            修改薪資
+            📅 排班連動
           </button>
         </div>
 
@@ -464,81 +484,157 @@
     </div>
   </div>
 
-  <!-- ==================== 彈窗 2：玉山通知記帳與對帳 Bottom Sheet ==================== -->
+  <!-- ==================== 彈窗 2：信用卡/簽帳卡 全自動刷卡偵測中心 Bottom Sheet ==================== -->
   <div id="modalNotifParser" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-base font-bold text-slate-900">玉山雙重通知記帳</h3>
-          <p class="text-xs text-slate-400">自動區分圈存與請款 · 防止重複扣款</p>
+          <h3 class="text-base font-bold text-slate-900">⚡ 信用卡・簽帳卡 全自動刷卡偵測</h3>
+          <p class="text-xs text-slate-400">免手動輸入 · 自動攔截刷卡推播與信件 · 絕不算錯扣款</p>
         </div>
         <button data-close-modal="modalNotifParser" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
       </div>
 
-      <details class="group rounded-2xl bg-slate-50 border border-slate-100 p-3">
-        <summary class="cursor-pointer list-none flex items-center justify-between text-xs font-semibold text-slate-600">
-          <span>🧪 點選代入測試範本（麥香 / LINE Pay / 海外匯差）</span>
-          <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-open:rotate-180 transition-transform"></i>
-        </summary>
-        <div class="mt-2.5 flex flex-wrap gap-1.5" id="presetButtonsWrap">
-          <button data-preset="maixiang_auth" class="btn-press px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium">🧃 A: 7-11 $10 圈存</button>
-          <button data-preset="maixiang_settle" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">✅ B: 超商 $10 請款</button>
-          <button data-preset="linepay_auth" class="btn-press px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium">💚 A: 連加*7-11 $85</button>
-          <button data-preset="linepay_settle" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">💚 B: 統一超商 $85 請款</button>
-          <button data-preset="steam_settle" class="btn-press px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-[11px] font-medium">🌍 B: Steam 請款 $1023</button>
-          <button data-preset="gas_settle" class="btn-press px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-[11px] font-medium">⛽ B: 中油請款 $135</button>
-          <button data-preset="verify_1ntd" class="btn-press px-2.5 py-1 rounded-full bg-purple-50 border border-purple-200 text-purple-800 text-[11px] font-medium">🪪 A: $1 綁卡驗證</button>
-          <button data-preset="easycard_topup" class="btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-medium">💧 A: 悠遊卡加值 $500</button>
-          <button data-preset="salary_in" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">💰 薪資入帳 $24,800</button>
+      <div class="rounded-2xl bg-indigo-50/70 border border-indigo-200/80 p-3.5 space-y-3 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-indigo-950 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            全自動偵測引擎運行中（每 15 秒即時同步）
+          </span>
+          <span class="px-2 py-0.5 rounded-full bg-white text-indigo-700 font-semibold text-[10px] border border-indigo-200">1-to-1 防重複扣款</span>
         </div>
-      </details>
 
-      <textarea id="notifInput" rows="3" class="input-fintech w-full text-xs" placeholder="貼上玉山 Wallet 推播或 Email 通知文字..."></textarea>
+        <div class="bg-white rounded-xl p-3 border border-indigo-100 space-y-2">
+          <div class="font-semibold text-slate-800">📱 方式 A：手機刷卡推播「秒級全自動入帳」（免開 App）</div>
+          <p class="text-[11px] text-slate-500 leading-relaxed">
+            iPhone「捷徑 ➔ 自動化」設定<b>收到「玉山 Wallet / 信用卡 / 簡訊 / 郵件」通知時</b>自動發送 <code class="text-indigo-600 font-mono">POST {"text":"通知內容"}</code>，刷卡 1 秒自動精準扣款！
+          </p>
+          <button type="button" id="btnCopyWebhookUrl" class="btn-press w-full py-2 rounded-xl bg-indigo-600 text-white font-semibold text-xs">
+            📋 一鍵複製自動入帳 Webhook 網址
+          </button>
+        </div>
 
-      <button id="btnParseNotif" class="btn-press w-full py-3.5 rounded-2xl bg-indigo-600 text-white font-semibold text-sm shadow-sm">
-        解析通知並寫入帳本
-      </button>
+        <div class="bg-white rounded-xl p-3 border border-indigo-100 space-y-2">
+          <div class="font-semibold text-slate-800">☁️ 方式 B：Gmail 刷卡通知信 24h 全自動掃描</div>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btnPollGmailNow" class="btn-press py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs">
+              🔄 立即掃描 Gmail 刷卡信
+            </button>
+            <button type="button" id="btnCopyGasScript" class="btn-press py-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold text-xs">
+              📋 複製 24h 雲端自動腳本
+            </button>
+          </div>
+        </div>
+
+        <label class="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-indigo-100 cursor-pointer">
+          <div>
+            <div class="font-semibold text-slate-800">📋 方式 C：智慧剪貼簿自動感應</div>
+            <div class="text-[10px] text-slate-400">複製刷卡通知後切回畫面，免貼上自動辨識入帳</div>
+          </div>
+          <input id="chkAutoClipboard" type="checkbox" checked class="w-4 h-4 accent-indigo-600" />
+        </label>
+      </div>
 
       <div id="notifResultBox" class="hidden rounded-2xl p-3.5 text-xs"></div>
+
+      <details class="group rounded-2xl bg-slate-50 border border-slate-100 p-3">
+        <summary class="cursor-pointer list-none flex items-center justify-between text-xs font-semibold text-slate-600">
+          <span>🧪 刷卡通知自動對帳模擬器 / 單筆補登</span>
+          <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-open:rotate-180 transition-transform"></i>
+        </summary>
+        <div class="mt-2.5 space-y-2.5">
+          <div class="flex flex-wrap gap-1.5" id="presetButtonsWrap">
+            <button data-preset="credit_ubear" class="btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-medium">💳 信用卡: U Bear 麥當勞 $165</button>
+            <button data-preset="maixiang_auth" class="btn-press px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium">🧃 A: 7-11 $10 圈存</button>
+            <button data-preset="maixiang_settle" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">✅ B: 超商 $10 請款</button>
+            <button data-preset="linepay_auth" class="btn-press px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium">💚 A: 連加*7-11 $85</button>
+            <button data-preset="linepay_settle" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">💚 B: 統一超商 $85 請款</button>
+            <button data-preset="steam_settle" class="btn-press px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-[11px] font-medium">🌍 B: Steam 請款 $1023</button>
+            <button data-preset="gas_settle" class="btn-press px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-[11px] font-medium">⛽ B: 中油請款 $135</button>
+            <button data-preset="verify_1ntd" class="btn-press px-2.5 py-1 rounded-full bg-purple-50 border border-purple-200 text-purple-800 text-[11px] font-medium">🪪 A: $1 綁卡驗證</button>
+            <button data-preset="easycard_topup" class="btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-medium">💧 A: 悠遊卡加值 $500</button>
+            <button data-preset="salary_in" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">💰 薪資入帳 $24,800</button>
+          </div>
+          <textarea id="notifInput" rows="3" class="input-fintech w-full text-xs" placeholder="點選上方模擬按鈕，或貼上單筆信用卡/玉山推播文字測試..."></textarea>
+          <button id="btnParseNotif" class="btn-press w-full py-3 rounded-2xl bg-indigo-600 text-white font-semibold text-xs shadow-sm">
+            模擬接收此筆刷卡通知並自動對帳
+          </button>
+        </div>
+      </details>
     </div>
   </div>
 
-  <!-- ==================== 彈窗 3：設定目前薪資 / 班表同步 Bottom Sheet ==================== -->
+  <!-- ==================== 彈窗 3：薪資 App 全自動連動與設定 Bottom Sheet ==================== -->
   <div id="modalShiftSync" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-base font-bold text-slate-900">設定薪資與時薪</h3>
-          <p class="text-xs text-slate-400">直接輸入金額或貼上班表 JSON</p>
+          <h3 class="text-base font-bold text-slate-900">📅 薪資 App 全自動連動</h3>
+          <p class="text-xs text-slate-400">與「打工薪水帳 V2」即時雙向同步 · 免手動輸入 JSON</p>
         </div>
         <button data-close-modal="modalShiftSync" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-slate-400 block mb-1">本月實領薪資 ($)</label>
-          <input id="manualNetSalaryInput" type="number" min="0" class="input-fintech w-full font-bold text-emerald-600" placeholder="例：25000" />
+      <!-- 全自動排班 App 連動卡片 -->
+      <div class="rounded-2xl bg-emerald-50/80 border border-emerald-200 p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            打工薪水帳 V2 自動橋接已啟動
+          </span>
+          <span id="shiftAutoSyncBadge" class="px-2 py-0.5 rounded-full bg-white text-emerald-700 font-semibold text-[10px] border border-emerald-200">免貼 JSON</span>
         </div>
-        <div>
-          <label class="text-xs text-slate-400 block mb-1">目前時薪 ($/hr)</label>
-          <input id="manualHourlyWageInput" type="number" min="1" class="input-fintech w-full font-bold text-slate-900" placeholder="例：200" value="200" />
-        </div>
+        <p class="text-[11px] text-emerald-800/90 leading-relaxed">
+          點擊下方按鈕直接開啟排班日曆（或上傳手寫班表照片），<b>任何排班、加班或時薪變動都會在背景 100% 自動同步回本記帳系統</b>，完全不需手動複製貼上 JSON！
+        </p>
+        <button type="button" id="btnOpenEmbeddedShiftApp" class="btn-press w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-sm flex items-center justify-center gap-2">
+          <i class="fa-solid fa-calendar-days"></i> 開啟「打工薪水帳 V2」排班表（即時自動同步）
+        </button>
+        <button type="button" id="btnAutoPullShiftNow" class="btn-press w-full py-2 rounded-xl bg-white border border-emerald-200 text-emerald-700 font-semibold text-xs">
+          🔄 立即從排班表重新抓取最新薪資
+        </button>
       </div>
 
-      <details class="group rounded-2xl bg-slate-50 border border-slate-100 p-3">
-        <summary class="cursor-pointer list-none flex items-center justify-between text-xs font-semibold text-slate-600">
-          <span>⚡ 進階：貼上「班表算錢程式」JSON 數據</span>
-          <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-open:rotate-180 transition-transform"></i>
-        </summary>
-        <div class="mt-2.5">
-          <textarea id="shiftJsonInput" rows="3" class="input-fintech w-full font-mono text-xs" placeholder="貼上 shiftpay-v2 JSON 數據..."></textarea>
+      <div class="pt-1 border-t border-slate-100 space-y-3">
+        <div class="text-xs font-semibold text-slate-500">或直接手動指定固定月薪 / 時薪：</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">本月實領薪資 ($)</label>
+            <input id="manualNetSalaryInput" type="number" min="0" class="input-fintech w-full font-bold text-emerald-600" placeholder="例：25000" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">目前時薪 ($/hr)</label>
+            <input id="manualHourlyWageInput" type="number" min="1" class="input-fintech w-full font-bold text-slate-900" placeholder="例：200" value="200" />
+          </div>
         </div>
-      </details>
 
-      <button id="btnConfirmShiftSync" class="btn-press w-full py-3.5 rounded-2xl bg-emerald-600 text-white font-semibold text-sm shadow-sm">
-        儲存薪資設定
-      </button>
+        <input id="shiftJsonInput" type="hidden" value="" />
+
+        <button id="btnConfirmShiftSync" class="btn-press w-full py-3 rounded-2xl bg-slate-900 text-white font-semibold text-xs shadow-sm">
+          儲存手動薪資設定
+        </button>
+      </div>
     </div>
+  </div>
+
+  <!-- ==================== 彈窗 6：內嵌式「打工薪水帳 V2」即時連動視窗 ==================== -->
+  <div id="modalEmbeddedShiftApp" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-xs flex flex-col">
+    <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <div>
+          <div class="text-sm font-bold leading-tight">💰 打工薪水帳 V2（全自動即時連動中）</div>
+          <div class="text-[11px] text-slate-400">點選日期排班或上傳班表照片，關閉視窗即自動更新記帳預算</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/shift-pay" target="_blank" class="px-2.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-medium">↗ 獨立分頁</a>
+        <button type="button" id="btnCloseEmbeddedShiftApp" class="btn-press px-3.5 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs">
+          ✅ 完成並同步
+        </button>
+      </div>
+    </div>
+    <iframe id="shiftAppIframe" src="about:blank" class="w-full flex-1 border-0 bg-black"></iframe>
   </div>
 
   <!-- ==================== 彈窗 4：玉山可用餘額校正 Bottom Sheet ==================== -->
@@ -608,8 +704,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js"></script>
-  <script src="/js/app.js"></script>
+  <script src="/js/browserEngine.js?v=20261021v4"></script>
+  <script src="/js/app.js?v=20261021v4"></script>
 </body>
 </html>
 

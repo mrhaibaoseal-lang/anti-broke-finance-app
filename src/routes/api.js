@@ -5,7 +5,7 @@ const { getSurvivalDashboardMetrics, syncCycleWithShiftData } = require('../serv
 const { processBankNotification, resolveGasTempHoldManually, markTransactionCanceled, scanGhostHolds } = require('../services/reconciliationEngine');
 const { getHighRiskModeStatus, evaluateImpulsePurchase, getCooldownCartSummary, fastForwardCooldownItem, resolveCooldownItem, getVampireAndSubscriptionRadar } = require('../services/impulseControlService');
 const { splitTransactionBill, settleSplitBill, getSplitBillsSummary, getWalletTankStatus, quickAdjustWalletTank, auditWalletTank, syncEsunAvailableBalance, splitUnknownGapTransaction } = require('../services/accountingPatchService');
-const { pollEsunEmailsViaImap } = require('../services/gmailImapService');
+const { pollEsunEmailsViaImap, decodeEmailMimeToText, buildGoogleAppsScriptCode } = require('../services/gmailImapService');
 
 /**
  * 首次啟動時若交易表為空，寫入貼近真實生活的預設展示資料（亦可隨時一鍵清空重置）
@@ -113,6 +113,12 @@ function buildFullDashboardSnapshot(db) {
       ...settings,
       gmail_app_password: settings.gmail_app_password ? '********' : ''
     },
+    automation: {
+      gmailAutoPollEnabled: Boolean(settings.gmail_user && settings.gmail_app_password),
+      shiftSyncSource: survival.cycle.shiftSyncSource,
+      lastShiftSyncedAt: survival.cycle.lastSyncedAt,
+      gasScriptCode: buildGoogleAppsScriptCode()
+    },
     survival,
     highRiskMode,
     ghostHolds,
@@ -125,38 +131,85 @@ function buildFullDashboardSnapshot(db) {
     balanceSyncLogs
   };
 }
+
 async function handleApiRequest(method, pathname, body = {}, searchParams, options = {}) {
   const db = options.db || getDb();
 
   if ((method === 'GET' || method === 'POST') && pathname === '/api/dashboard') {
+    if (body && body.autoShiftState) {
+      try {
+        syncCycleWithShiftData(db, { rawJsonPayload: body.autoShiftState, isAutoSync: true });
+      } catch (_) {}
+    }
     return { status: 200, data: { ok: true, ...buildFullDashboardSnapshot(db) } };
   }
 
-  // 1. 玉山銀行通知解析 (手動貼上 / iOS 捷徑 Webhook)
-  if (method === 'POST' && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook')) {
-    const rawText = body.text || body.rawText || body.message || '';
-    const source = pathname.endsWith('/webhook') ? (body.source || 'ios_shortcut_webhook') : (body.source || 'manual_ui');
+  // 1. 銀行與信用卡刷卡通知全自動接收與解析 (支援 iOS/Android 自動化推播 Webhook、Google Apps Script、Email MIME 與批次陣列)
+  if (method === 'POST' && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch')) {
+    const source = pathname.endsWith('/webhook')
+      ? (body.source || 'auto_webhook')
+      : (pathname.endsWith('/batch') ? (body.source || 'auto_batch_webhook') : (body.source || 'manual_ui'));
+
+    const batchList = Array.isArray(body.notifications)
+      ? body.notifications
+      : (Array.isArray(body.messages) ? body.messages : null);
+
+    if (batchList && batchList.length > 0) {
+      const results = [];
+      for (const item of batchList) {
+        const itemObj = typeof item === 'string' ? { text: item } : (item || {});
+        const text = itemObj.rawEmail
+          ? decodeEmailMimeToText(itemObj.rawEmail)
+          : (itemObj.text || itemObj.rawText || itemObj.message || itemObj.notification || '');
+        if (!String(text).trim()) continue;
+        try {
+          const r = processBankNotification(db, text, {
+            source: itemObj.source || source,
+            emailUid: itemObj.emailUid || itemObj.messageId || itemObj.uid,
+            timestamp: itemObj.timestamp || new Date().toISOString(),
+            referenceDate: itemObj.referenceDate || body.referenceDate
+          });
+          results.push(r);
+        } catch (_) {}
+      }
+      return {
+        status: 200,
+        data: {
+          ok: true,
+          processedCount: results.length,
+          results,
+          result: results[results.length - 1] || null,
+          dashboard: buildFullDashboardSnapshot(db)
+        }
+      };
+    }
+
+    const rawText = body.rawEmail
+      ? decodeEmailMimeToText(body.rawEmail)
+      : (body.text || body.rawText || body.message || body.notification || body.body || '');
     const result = processBankNotification(db, rawText, {
       source,
+      emailUid: body.emailUid || body.messageId || body.uid,
       timestamp: body.timestamp || new Date().toISOString(),
       referenceDate: body.referenceDate
     });
     return { status: 200, data: { ok: true, result, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 2. Gmail IMAP 主動收信測試
+  // 2. Gmail IMAP 主動與背景自動掃描
   if (method === 'POST' && pathname === '/api/notifications/gmail-poll') {
     const imapRes = await pollEsunEmailsViaImap(db);
     return { status: 200, data: { ok: true, imap: imapRes, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 3. 薪資設定與唯讀跨專案班表同步 (支援直接輸入實領薪資/總薪資/時薪，或貼上 shiftpay-v2 JSON)
-  if (method === 'POST' && pathname === '/api/shift/sync') {
+  // 3. 薪資設定與跨專案班表全自動同步 (支援 shift-pay-app 即時自動推送、外部目錄自動掃描、或手動微調)
+  if (method === 'POST' && (pathname === '/api/shift/sync' || pathname === '/api/shift/webhook')) {
     const cycle = syncCycleWithShiftData(db, {
-      rawJsonPayload: body.rawJsonPayload || null,
+      rawJsonPayload: body.rawJsonPayload || body.shiftState || body.payload || null,
       manualNetSalary: body.manualNetSalary,
       manualGrossPay: body.manualGrossPay,
       manualHourlyWage: body.manualHourlyWage,
+      isAutoSync: Boolean(body.autoSync),
       referenceDateStr: body.referenceDate || null
     });
     const effective = cycle.is_salary_settled && cycle.actual_salary !== null ? cycle.actual_salary : cycle.estimated_net_pay;
@@ -164,7 +217,7 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
       status: 200,
       data: {
         ok: true,
-        message: `✅ 已更新本月薪資設定！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
+        message: `✅ 已自動同步本月薪資與班表！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
         cycle,
         dashboard: buildFullDashboardSnapshot(db)
       }

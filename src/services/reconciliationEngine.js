@@ -25,7 +25,7 @@ function creditWalletTankFromTx(db, tankType, amount, note, txId, nowIso) {
   `).run(tankType, Number(amount), newBalance, note, txId, nowIso);
 }
 
-function checkDebounceDuplicate(db, dedupeHash, nowIso) {
+function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
   const nowMs = new Date(nowIso).getTime();
   const recentLogs = db.prepare(`
     SELECT id, received_at, linked_tx_id
@@ -44,6 +44,34 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso) {
       };
     }
   }
+
+  // 進階跨管道防重（例如：手機推播先到、Gmail 通知信稍後收進來，具有相同 Email UID、相同刷卡時間 HH:mm 或相同授權碼 AuthCode）
+  if (parsed && (parsed.authCode || parsed.txTimeMinute || parsed.emailUid)) {
+    if (parsed.emailUid) {
+      const logs = db.prepare('SELECT * FROM notification_logs ORDER BY id DESC LIMIT 100').all();
+      const uidTag = `[UID:${parsed.emailUid}]`;
+      const hitLog = logs.find(l => String(l.action_taken || '').includes(uidTag) || String(l.raw_text || '').includes(uidTag));
+      if (hitLog) {
+        return { isDuplicate: true, diffSeconds: 0, originalTxId: hitLog.linked_tx_id, reason: 'SAME_EMAIL_UID' };
+      }
+    }
+    const candidates = db.prepare(`
+      SELECT * FROM transactions
+      WHERE status IN ('PENDING', 'TEMP_HOLD') AND is_reconciled_locked = 0
+      ORDER BY tx_date ASC, tx_timestamp ASC, id ASC
+    `).all();
+    for (const tx of candidates) {
+      if (tx.tx_date !== parsed.txDate || Number(tx.auth_amount) !== Number(parsed.amount)) continue;
+      if (tx.normalized_merchant !== parsed.normalizedMerchant) continue;
+      if (parsed.authCode && tx.auth_code && parsed.authCode === tx.auth_code) {
+        return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_AUTH_CODE' };
+      }
+      if (parsed.txTimeMinute && tx.channel_a_raw && tx.channel_a_raw.includes(parsed.txTimeMinute)) {
+        return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_TX_TIME_MINUTE' };
+      }
+    }
+  }
+
   return { isDuplicate: false };
 }
 
@@ -145,6 +173,10 @@ function processBankNotification(db, rawText, options = {}) {
   const source = options.source || 'manual';
 
   const parsed = parseEsunNotification(rawText, { referenceDate: refDate });
+  if (options.emailUid) {
+    parsed.emailUid = String(options.emailUid);
+  }
+  const uidSuffix = parsed.emailUid ? ` [UID:${parsed.emailUid}]` : '';
   const cycle = ensureCurrentCycle(db, parsed.txDate || refDate);
   const dedupeHash = `${parsed.normalizedMerchant}|${parsed.amount}`;
 
@@ -196,11 +228,11 @@ function processBankNotification(db, rawText, options = {}) {
     }
   }
 
-  // 情境 3：通道 A（第 1 次通知：簽帳金融卡消費 / 授權圈存）
+  // 情境 3：通道 A（第 1 次通知：簽帳金融卡消費 / 授權圈存 / 信用卡刷卡）
   if (parsed.channelType === 'CHANNEL_A_AUTH') {
-    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso);
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
     if (debounce.isDuplicate) {
-      const ignoreMsg = `🛡️ 3分鐘防抖動鎖觸發：與 ${debounce.diffSeconds} 秒前之「${parsed.normalizedMerchant} $${parsed.amount}」完全相同，判定為銀行重複推播自動忽略！`;
+      const ignoreMsg = `🛡️ 防重複扣款鎖觸發：與既有「${parsed.normalizedMerchant} $${parsed.amount}」為同一筆刷卡通知，已自動忽略不重複扣款！${uidSuffix}`;
       db.prepare(`
         INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
         VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
@@ -217,7 +249,8 @@ function processBankNotification(db, rawText, options = {}) {
 
     let status = 'PENDING';
     let personalAmount = parsed.amount;
-    let reconcileNote = '圈存中（已立即從當月可用安全預算扣除）';
+    const cardLabel = parsed.cardType === 'CREDIT' ? '信用卡刷卡' : '簽帳卡圈存';
+    let reconcileNote = `${cardLabel}（已立即從當月可用安全預算精準扣除 $${parsed.amount}）${uidSuffix}`;
 
     if (parsed.isVerifyAuth) {
       status = 'AUTH_VERIFY';

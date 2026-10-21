@@ -1,6 +1,6 @@
 'use strict';
 
-const { readExternalShiftDirectory, parseShiftPayload, calculateEstimatedNetPay } = require('./shiftSyncService');
+const { readExternalShiftDirectory, parseShiftPayload, saveLatestShiftSyncCache, calculateEstimatedNetPay } = require('./shiftSyncService');
 
 function pad2(n) {
   return String(n).padStart(2, '0');
@@ -64,7 +64,7 @@ function ensureCurrentCycle(db, referenceDateStr) {
   return cycle;
 }
 
-function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = null, manualGrossPay = null, manualHourlyWage = null, recalculateOnly = false, referenceDateStr = null } = {}) {
+function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = null, manualGrossPay = null, manualHourlyWage = null, recalculateOnly = false, isAutoSync = false, referenceDateStr = null } = {}) {
   const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get();
   const cycle = ensureCurrentCycle(db, referenceDateStr);
   const nowIso = new Date().toISOString();
@@ -120,10 +120,37 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = n
     return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
   }
 
-  // 模式 D：從貼上的 shiftpay-v2 JSON 或外部目錄唯讀同步
-  const synced = rawJsonPayload
-    ? { ...parseShiftPayload(rawJsonPayload, cycle.target_shift_month), syncSource: 'clipboard_or_upload_json' }
-    : readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+  // 模式 D：從自動連動的 shift-pay-app 狀態或外部目錄唯讀同步
+  let synced;
+  if (rawJsonPayload) {
+    synced = {
+      ...parseShiftPayload(rawJsonPayload, cycle.target_shift_month),
+      syncSource: 'shift_pay_app_auto_sync'
+    };
+    if ((synced.totalPay > 0 || synced.shiftCount > 0) && !process.env.NODE_TEST_CONTEXT) {
+      saveLatestShiftSyncCache(rawJsonPayload);
+    }
+    // 自動背景同步保護：若班表 App 尚無排班 (totalPay === 0) 且記帳系統已有設定薪資，僅同步時薪而不歸零預算
+    if (isAutoSync && synced.totalPay === 0 && Number(cycle.shift_gross_pay) > 0) {
+      if (synced.hourlyWage > 0) {
+        db.prepare('UPDATE user_settings SET default_hourly_wage = ?, updated_at = ? WHERE id = 1').run(synced.hourlyWage, nowIso);
+        db.prepare('UPDATE income_cycles SET hourly_wage = ?, last_synced_at = ? WHERE cycle_key = ?').run(synced.hourlyWage, nowIso, cycle.cycle_key);
+      }
+      return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
+    }
+  } else {
+    synced = readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+    // 若外部目錄僅讀到 0 元空範本，且當前週期已有班表薪資數據，保留既有數據避免覆蓋歸零
+    if ((!synced || synced.totalPay === 0) && Number(cycle.shift_gross_pay) > 0) {
+      const estNet = calculateEstimatedNetPay(cycle.shift_gross_pay, settings.net_pay_factor, settings.labor_health_deduction);
+      db.prepare(`
+        UPDATE income_cycles
+        SET hourly_wage = ?, estimated_net_pay = ?, last_synced_at = ?
+        WHERE cycle_key = ?
+      `).run(wage, estNet, nowIso, cycle.cycle_key);
+      return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
+    }
+  }
 
   const estNetPay = calculateEstimatedNetPay(
     synced.totalPay,

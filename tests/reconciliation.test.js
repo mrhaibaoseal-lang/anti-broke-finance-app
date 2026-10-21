@@ -298,5 +298,93 @@ test('8. Cloudflare 無伺服器相容引擎 (PortableSqliteDb & 快照匯出入
   assert.equal(settleRes.data.result.transaction.id, authRes.data.result.transaction.id);
 });
 
+test('9. 信用卡與簽帳卡全自動偵測：免責聲明防誤判、小數點金額、可用餘額排除、跨管道(推播+Gmail MIME)絕不重複扣款', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const db = setupTestDb();
+
+  // (A) 手機推播先到達：含「末四碼1234」、「165.00 元」、「可用餘額 15,800 元」與「實際請款金額以帳單為準」免責聲明
+  const pushRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_shortcut_auto',
+    text: '【消費通知】您的玉山Ｕ Bear信用卡(末四碼1234)於 2026/10/21 14:25 在「連加*麥當勞」一般消費 新臺幣 165.00 元（帳戶可用餘額 NT$15,800 元），實際請款金額以帳單為準。',
+    timestamp: '2026-10-21T06:25:05.000Z',
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(pushRes.data.ok, true);
+  assert.equal(pushRes.data.result.resultType, 'PENDING_CREATED');
+  assert.equal(pushRes.data.result.parsed.channelType, 'CHANNEL_A_AUTH');
+  assert.equal(pushRes.data.result.parsed.cardType, 'CREDIT');
+  assert.equal(pushRes.data.result.parsed.cardLast4, '1234');
+  assert.equal(pushRes.data.result.parsed.normalizedMerchant, '麥當勞');
+  assert.equal(pushRes.data.result.parsed.amount, 165);
+  assert.equal(pushRes.data.result.parsed.reportedAvailableBalance, 15800);
+
+  // (B) 15 分鐘後 Gmail 自動掃描又抓到同一筆 14:25 的消費通知信 -> 必須被跨管道防重鎖攔截，絕不重複扣款！
+  const emailRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'gmail_imap_auto',
+    emailUid: '99881',
+    text: '【玉山銀行信用卡消費通知】卡號末4碼1234 於 2026/10/21 14:25 特店名稱：麥當勞 消費金額：NT$165 元，實際請款金額以商店請款為準。',
+    timestamp: '2026-10-21T06:40:00.000Z',
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(emailRes.data.result.resultType, 'DEBOUNCE_IGNORED');
+
+  // 驗證總花費精準為 $165，絕不會算錯成 $330 或 $15800！
+  const metrics = getSurvivalDashboardMetrics(db, '2026-10-21');
+  assert.equal(metrics.budget.totalSpent, 165);
+});
+
+test('10. 薪資 App (shift-pay-app) 全自動無感連動：免手動貼 JSON 自動計算排班與加班薪資，且防空班表誤覆蓋', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const db = setupTestDb();
+
+  // 模擬 shift-pay-app 在背景自動推送完整排班狀態 (2 天晚班 4h + 1 天假日班 8h 含加班 60m + 全勤 $500)
+  const autoShiftPayload = {
+    app: 'shiftpay-v2',
+    updatedAt: '2026-10-21T10:00:00.000Z',
+    month: '2026-10',
+    state: {
+      settings: {
+        hourlyWage: 200,
+        otMultiplier: 1.34,
+        roundingMode: 'monthly',
+        attendanceBonus: 500,
+        myName: '王凱弘'
+      },
+      shifts: {
+        '2026-10-12': { name: '晚班', start: '18:00', end: '22:00', breakMin: 0, otMin: 0, status: 'normal' },
+        '2026-10-14': { name: '晚班', start: '18:00', end: '22:00', breakMin: 0, otMin: 0, status: 'normal' },
+        '2026-10-18': { name: '假日班', start: '10:00', end: '19:00', breakMin: 60, otMin: 60, status: 'normal' }
+      }
+    }
+  };
+
+  const syncRes = await handleApiRequest('POST', '/api/shift/sync', {
+    rawJsonPayload: autoShiftPayload,
+    autoSync: true,
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(syncRes.data.ok, true);
+  // 正常工時 = 4 + 4 + 8 = 16h ($3,200)，加班 60m = round(200 * 1.34) = $268，全勤 = $500 ➔ 總薪資 $3,968
+  assert.equal(syncRes.data.cycle.shift_gross_pay, 3968);
+  assert.equal(syncRes.data.cycle.normal_hours, 16);
+  assert.equal(syncRes.data.cycle.ot_minutes, 60);
+  assert.equal(syncRes.data.cycle.bonus_pay, 500);
+  // 預估實領 (×0.95) = round(3968 * 0.95) = 3770
+  assert.equal(syncRes.data.cycle.estimated_net_pay, 3770);
+
+  // 若另一個空瀏覽器分頁觸發 autoSync (shifts 為空)，系統應保護既有 $3,968 薪資不被歸零
+  const emptyAutoRes = await handleApiRequest('POST', '/api/shift/sync', {
+    rawJsonPayload: { app: 'shiftpay-v2', state: { settings: { hourlyWage: 210 }, shifts: {} } },
+    autoSync: true,
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(emptyAutoRes.data.cycle.shift_gross_pay, 3968);
+  assert.equal(emptyAutoRes.data.cycle.hourly_wage, 210);
+});
+
 
 

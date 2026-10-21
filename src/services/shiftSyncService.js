@@ -2,13 +2,18 @@
 
 let fs = null;
 let path = null;
+let os = null;
 try {
   fs = require('node:fs');
   path = require('node:path');
+  os = require('node:os');
 } catch (_) {}
 
 const SAMPLE_SHIFT_PATH = (path && typeof __dirname !== 'undefined')
   ? path.join(__dirname, '..', '..', 'data', 'sample_shift_data.json')
+  : '';
+const LATEST_SYNC_CACHE_PATH = (path && typeof __dirname !== 'undefined')
+  ? path.join(__dirname, '..', '..', 'data', 'latest_shift_sync.json')
   : '';
 
 const DEFAULT_SAMPLE_SHIFT_DATA = {
@@ -97,6 +102,14 @@ function parseShiftPayload(payload, preferredMonth) {
   if (!data || typeof data !== 'object') {
     throw new Error('無效的班表 JSON 資料');
   }
+  if (data.state && typeof data.state === 'object' && data.state.shifts) {
+    const computed = computeShiftPayFromFullState(data.state, preferredMonth || data.month);
+    return { ...computed, fullState: data.state };
+  }
+  if (data.shifts && typeof data.shifts === 'object') {
+    const computed = computeShiftPayFromFullState(data, preferredMonth);
+    return { ...computed, fullState: data };
+  }
   if (typeof data.totalPay === 'number' && !data.shifts) {
     return {
       month: data.month || preferredMonth || new Date().toISOString().slice(0, 7),
@@ -109,35 +122,72 @@ function parseShiftPayload(payload, preferredMonth) {
       otMinutes: Number(data.otMinutes) || 0,
       bonusOk: Boolean(data.bonusOk),
       bonusPay: Math.round(Number(data.bonusPay) || 0),
-      shiftCount: Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0
+      shiftCount: Number(data.shiftCount) || (Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0)
     };
   }
-  if (data.shifts && typeof data.shifts === 'object') {
-    return computeShiftPayFromFullState(data, preferredMonth);
-  }
-  throw new Error('無法識別的班表 JSON 結構（需為 shiftpay-v2 小工具 JSON 或備份 JSON）');
+  throw new Error('無法識別的班表資料結構');
+}
+
+function saveLatestShiftSyncCache(payload) {
+  try {
+    if (fs && path && LATEST_SYNC_CACHE_PATH) {
+      const dir = path.dirname(LATEST_SYNC_CACHE_PATH);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const raw = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+      fs.writeFileSync(LATEST_SYNC_CACHE_PATH, raw, 'utf8');
+    }
+  } catch (_) {}
 }
 
 function readExternalShiftDirectory(shiftAppPath, preferredMonth) {
-  const ignored = new Set(['vercel.json', 'package.json', 'package-lock.json', 'tsconfig.json']);
+  const ignored = new Set(['vercel.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'wrangler.jsonc']);
   try {
-    if (fs && path && typeof fs.existsSync === 'function' && shiftAppPath && fs.existsSync(shiftAppPath)) {
-      const entries = fs.readdirSync(shiftAppPath, { withFileTypes: true });
-      const candidates = entries
-        .filter(e => e.isFile() && e.name.endsWith('.json') && !ignored.has(e.name))
-        .map(e => {
-          const fullPath = path.join(shiftAppPath, e.name);
-          return { name: e.name, fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs };
-        })
-        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    // 1. 優先讀取自動同步快取 (latest_shift_sync.json)
+    if (fs && LATEST_SYNC_CACHE_PATH && typeof fs.existsSync === 'function' && fs.existsSync(LATEST_SYNC_CACHE_PATH)) {
+      try {
+        const parsed = parseShiftPayload(fs.readFileSync(LATEST_SYNC_CACHE_PATH, 'utf8'), preferredMonth);
+        if (parsed.totalPay > 0 || parsed.shiftCount > 0) {
+          return { ...parsed, syncSource: 'auto_shift_bridge_cache', externalPath: LATEST_SYNC_CACHE_PATH };
+        }
+      } catch (_) {}
+    }
 
-      for (const c of candidates) {
+    // 2. 自動掃描班表專案目錄與使用者常用匯出目錄 (Downloads / Desktop)
+    const searchDirs = [];
+    if (shiftAppPath) searchDirs.push(shiftAppPath);
+    if (os && typeof os.homedir === 'function') {
+      const home = os.homedir();
+      if (path) {
+        searchDirs.push(path.join(home, 'Downloads'));
+        searchDirs.push(path.join(home, 'Desktop'));
+      }
+    }
+
+    const candidates = [];
+    if (fs && path && typeof fs.existsSync === 'function') {
+      for (const dir of searchDirs) {
+        if (!dir || !fs.existsSync(dir)) continue;
         try {
-          const parsed = parseShiftPayload(fs.readFileSync(c.fullPath, 'utf8'), preferredMonth);
-          return { ...parsed, syncSource: `external_file:${c.name}`, externalPath: c.fullPath };
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const e of entries) {
+            if (!e.isFile() || !e.name.endsWith('.json') || ignored.has(e.name)) continue;
+            if (dir !== shiftAppPath && !/打工薪水帳|shift_data|shiftpay/i.test(e.name)) continue;
+            const fullPath = path.join(dir, e.name);
+            candidates.push({ name: e.name, fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs });
+          }
         } catch (_) {}
       }
+    }
 
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const c of candidates) {
+      try {
+        const parsed = parseShiftPayload(fs.readFileSync(c.fullPath, 'utf8'), preferredMonth);
+        return { ...parsed, syncSource: `auto_file:${c.name}`, externalPath: c.fullPath };
+      } catch (_) {}
+    }
+
+    if (fs && path && typeof fs.existsSync === 'function' && shiftAppPath && fs.existsSync(shiftAppPath)) {
       const indexHtmlPath = path.join(shiftAppPath, 'index.html');
       if (fs.existsSync(indexHtmlPath)) {
         const htmlContent = fs.readFileSync(indexHtmlPath, 'utf8');
@@ -181,6 +231,7 @@ function calculateEstimatedNetPay(grossPay, netPayFactor = 0.95, laborHealthDedu
 module.exports = {
   computeShiftPayFromFullState,
   parseShiftPayload,
+  saveLatestShiftSyncCache,
   readExternalShiftDirectory,
   calculateEstimatedNetPay
 };

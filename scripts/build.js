@@ -6,6 +6,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DIST_DIR = path.join(ROOT, 'dist');
+const EXTERNAL_SHIFT_HTML = 'C:\\Users\\mrhai\\.gemini\\antigravity\\scratch\\shift-pay-app\\index.html';
 
 const MODULE_MAP = {
   'portableDb': 'src/db/portableDb.js',
@@ -69,6 +70,9 @@ function copyRecursive(src, dest) {
 }
 
 buildBrowserEngineBundle();
+if (fs.existsSync(EXTERNAL_SHIFT_HTML)) {
+  fs.copyFileSync(EXTERNAL_SHIFT_HTML, path.join(PUBLIC_DIR, 'shift-pay.html'));
+}
 copyRecursive(PUBLIC_DIR, DIST_DIR);
-console.log('✅ Build complete: browserEngine.js bundled & public/ synced to dist/.');
+console.log('✅ Build complete: browserEngine.js bundled, shift-pay.html synced & public/ synced to dist/.');
 

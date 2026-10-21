@@ -527,13 +527,18 @@ module.exports = {
 
 let fs = null;
 let path = null;
+let os = null;
 try {
   fs = require('node:fs');
   path = require('node:path');
+  os = require('node:os');
 } catch (_) {}
 
 const SAMPLE_SHIFT_PATH = (path && typeof __dirname !== 'undefined')
   ? path.join(__dirname, '..', '..', 'data', 'sample_shift_data.json')
+  : '';
+const LATEST_SYNC_CACHE_PATH = (path && typeof __dirname !== 'undefined')
+  ? path.join(__dirname, '..', '..', 'data', 'latest_shift_sync.json')
   : '';
 
 const DEFAULT_SAMPLE_SHIFT_DATA = {
@@ -622,6 +627,14 @@ function parseShiftPayload(payload, preferredMonth) {
   if (!data || typeof data !== 'object') {
     throw new Error('無效的班表 JSON 資料');
   }
+  if (data.state && typeof data.state === 'object' && data.state.shifts) {
+    const computed = computeShiftPayFromFullState(data.state, preferredMonth || data.month);
+    return { ...computed, fullState: data.state };
+  }
+  if (data.shifts && typeof data.shifts === 'object') {
+    const computed = computeShiftPayFromFullState(data, preferredMonth);
+    return { ...computed, fullState: data };
+  }
   if (typeof data.totalPay === 'number' && !data.shifts) {
     return {
       month: data.month || preferredMonth || new Date().toISOString().slice(0, 7),
@@ -634,35 +647,72 @@ function parseShiftPayload(payload, preferredMonth) {
       otMinutes: Number(data.otMinutes) || 0,
       bonusOk: Boolean(data.bonusOk),
       bonusPay: Math.round(Number(data.bonusPay) || 0),
-      shiftCount: Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0
+      shiftCount: Number(data.shiftCount) || (Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0)
     };
   }
-  if (data.shifts && typeof data.shifts === 'object') {
-    return computeShiftPayFromFullState(data, preferredMonth);
-  }
-  throw new Error('無法識別的班表 JSON 結構（需為 shiftpay-v2 小工具 JSON 或備份 JSON）');
+  throw new Error('無法識別的班表資料結構');
+}
+
+function saveLatestShiftSyncCache(payload) {
+  try {
+    if (fs && path && LATEST_SYNC_CACHE_PATH) {
+      const dir = path.dirname(LATEST_SYNC_CACHE_PATH);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const raw = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+      fs.writeFileSync(LATEST_SYNC_CACHE_PATH, raw, 'utf8');
+    }
+  } catch (_) {}
 }
 
 function readExternalShiftDirectory(shiftAppPath, preferredMonth) {
-  const ignored = new Set(['vercel.json', 'package.json', 'package-lock.json', 'tsconfig.json']);
+  const ignored = new Set(['vercel.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'wrangler.jsonc']);
   try {
-    if (fs && path && typeof fs.existsSync === 'function' && shiftAppPath && fs.existsSync(shiftAppPath)) {
-      const entries = fs.readdirSync(shiftAppPath, { withFileTypes: true });
-      const candidates = entries
-        .filter(e => e.isFile() && e.name.endsWith('.json') && !ignored.has(e.name))
-        .map(e => {
-          const fullPath = path.join(shiftAppPath, e.name);
-          return { name: e.name, fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs };
-        })
-        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    // 1. 優先讀取自動同步快取 (latest_shift_sync.json)
+    if (fs && LATEST_SYNC_CACHE_PATH && typeof fs.existsSync === 'function' && fs.existsSync(LATEST_SYNC_CACHE_PATH)) {
+      try {
+        const parsed = parseShiftPayload(fs.readFileSync(LATEST_SYNC_CACHE_PATH, 'utf8'), preferredMonth);
+        if (parsed.totalPay > 0 || parsed.shiftCount > 0) {
+          return { ...parsed, syncSource: 'auto_shift_bridge_cache', externalPath: LATEST_SYNC_CACHE_PATH };
+        }
+      } catch (_) {}
+    }
 
-      for (const c of candidates) {
+    // 2. 自動掃描班表專案目錄與使用者常用匯出目錄 (Downloads / Desktop)
+    const searchDirs = [];
+    if (shiftAppPath) searchDirs.push(shiftAppPath);
+    if (os && typeof os.homedir === 'function') {
+      const home = os.homedir();
+      if (path) {
+        searchDirs.push(path.join(home, 'Downloads'));
+        searchDirs.push(path.join(home, 'Desktop'));
+      }
+    }
+
+    const candidates = [];
+    if (fs && path && typeof fs.existsSync === 'function') {
+      for (const dir of searchDirs) {
+        if (!dir || !fs.existsSync(dir)) continue;
         try {
-          const parsed = parseShiftPayload(fs.readFileSync(c.fullPath, 'utf8'), preferredMonth);
-          return { ...parsed, syncSource: `external_file:${c.name}`, externalPath: c.fullPath };
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const e of entries) {
+            if (!e.isFile() || !e.name.endsWith('.json') || ignored.has(e.name)) continue;
+            if (dir !== shiftAppPath && !/打工薪水帳|shift_data|shiftpay/i.test(e.name)) continue;
+            const fullPath = path.join(dir, e.name);
+            candidates.push({ name: e.name, fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs });
+          }
         } catch (_) {}
       }
+    }
 
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const c of candidates) {
+      try {
+        const parsed = parseShiftPayload(fs.readFileSync(c.fullPath, 'utf8'), preferredMonth);
+        return { ...parsed, syncSource: `auto_file:${c.name}`, externalPath: c.fullPath };
+      } catch (_) {}
+    }
+
+    if (fs && path && typeof fs.existsSync === 'function' && shiftAppPath && fs.existsSync(shiftAppPath)) {
       const indexHtmlPath = path.join(shiftAppPath, 'index.html');
       if (fs.existsSync(indexHtmlPath)) {
         const htmlContent = fs.readFileSync(indexHtmlPath, 'utf8');
@@ -706,6 +756,7 @@ function calculateEstimatedNetPay(grossPay, netPayFactor = 0.95, laborHealthDedu
 module.exports = {
   computeShiftPayFromFullState,
   parseShiftPayload,
+  saveLatestShiftSyncCache,
   readExternalShiftDirectory,
   calculateEstimatedNetPay
 };
@@ -714,7 +765,7 @@ module.exports = {
   "survivalEngine": function(module, exports, require) {
 'use strict';
 
-const { readExternalShiftDirectory, parseShiftPayload, calculateEstimatedNetPay } = require('./shiftSyncService');
+const { readExternalShiftDirectory, parseShiftPayload, saveLatestShiftSyncCache, calculateEstimatedNetPay } = require('./shiftSyncService');
 
 function pad2(n) {
   return String(n).padStart(2, '0');
@@ -778,7 +829,7 @@ function ensureCurrentCycle(db, referenceDateStr) {
   return cycle;
 }
 
-function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = null, manualGrossPay = null, manualHourlyWage = null, recalculateOnly = false, referenceDateStr = null } = {}) {
+function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = null, manualGrossPay = null, manualHourlyWage = null, recalculateOnly = false, isAutoSync = false, referenceDateStr = null } = {}) {
   const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get();
   const cycle = ensureCurrentCycle(db, referenceDateStr);
   const nowIso = new Date().toISOString();
@@ -834,10 +885,37 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = n
     return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
   }
 
-  // 模式 D：從貼上的 shiftpay-v2 JSON 或外部目錄唯讀同步
-  const synced = rawJsonPayload
-    ? { ...parseShiftPayload(rawJsonPayload, cycle.target_shift_month), syncSource: 'clipboard_or_upload_json' }
-    : readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+  // 模式 D：從自動連動的 shift-pay-app 狀態或外部目錄唯讀同步
+  let synced;
+  if (rawJsonPayload) {
+    synced = {
+      ...parseShiftPayload(rawJsonPayload, cycle.target_shift_month),
+      syncSource: 'shift_pay_app_auto_sync'
+    };
+    if ((synced.totalPay > 0 || synced.shiftCount > 0) && !process.env.NODE_TEST_CONTEXT) {
+      saveLatestShiftSyncCache(rawJsonPayload);
+    }
+    // 自動背景同步保護：若班表 App 尚無排班 (totalPay === 0) 且記帳系統已有設定薪資，僅同步時薪而不歸零預算
+    if (isAutoSync && synced.totalPay === 0 && Number(cycle.shift_gross_pay) > 0) {
+      if (synced.hourlyWage > 0) {
+        db.prepare('UPDATE user_settings SET default_hourly_wage = ?, updated_at = ? WHERE id = 1').run(synced.hourlyWage, nowIso);
+        db.prepare('UPDATE income_cycles SET hourly_wage = ?, last_synced_at = ? WHERE cycle_key = ?').run(synced.hourlyWage, nowIso, cycle.cycle_key);
+      }
+      return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
+    }
+  } else {
+    synced = readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+    // 若外部目錄僅讀到 0 元空範本，且當前週期已有班表薪資數據，保留既有數據避免覆蓋歸零
+    if ((!synced || synced.totalPay === 0) && Number(cycle.shift_gross_pay) > 0) {
+      const estNet = calculateEstimatedNetPay(cycle.shift_gross_pay, settings.net_pay_factor, settings.labor_health_deduction);
+      db.prepare(`
+        UPDATE income_cycles
+        SET hourly_wage = ?, estimated_net_pay = ?, last_synced_at = ?
+        WHERE cycle_key = ?
+      `).run(wage, estNet, nowIso, cycle.cycle_key);
+      return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
+    }
+  }
 
   const estNetPay = calculateEstimatedNetPay(
     synced.totalPay,
@@ -1031,10 +1109,20 @@ function normalizeMerchant(rawMerchant) {
     /^NEWEBPAY[\*\-\s_]*/,
     /^全支付[\*\-\s_]*/,
     /^PXPAY[\*\-\s_]*/,
+    /^全盈支付[\*\-\s_]*/,
+    /^全盈[\*\-\s_]*/,
     /^拍付[\*\-\s_]*/,
     /^PI錢包[\*\-\s_]*/,
     /^一卡通[\*\-\s_]*/,
-    /^IPASS[\*\-\s_]*/
+    /^IPASS[\*\-\s_]*/,
+    /^悠遊付[\*\-\s_]*/,
+    /^EASY\s*WALLET[\*\-\s_]*/,
+    /^台灣PAY[\*\-\s_]*/,
+    /^TWQR[\*\-\s_]*/,
+    /^APPLE\s*PAY[\*\-\s_]*/,
+    /^GOOGLE\s*PAY[\*\-\s_]*/,
+    /^SAMSUNG\s*PAY[\*\-\s_]*/,
+    /^玉山WALLET[\*\-\s_]*/
   ];
 
   let changed = true;
@@ -1052,8 +1140,14 @@ function normalizeMerchant(rawMerchant) {
   if (/7[\-\s]*11|7[\-\s]*ELEVEN|統一超商/.test(s)) {
     return '7-ELEVEN';
   }
-  if (/全家便利|全家超商|FAMILY\s*MART|FAMILYMART/.test(s)) {
+  if (/全家便利|全家超商|FAMILY\s*MART|FAMILYMART|^全家$/.test(s)) {
     return '全家便利商店';
+  }
+  if (/萊爾富|HI[\-\s]*LIFE/.test(s)) {
+    return '萊爾富';
+  }
+  if (/OK超商|OK\s*MART|來來超商/.test(s)) {
+    return 'OK超商';
   }
   if (/台灣中油|中國石油|中油/.test(s)) {
     return '台灣中油';
@@ -1069,6 +1163,15 @@ function normalizeMerchant(rawMerchant) {
   }
   if (/NETFLIX/.test(s)) {
     return 'NETFLIX';
+  }
+  if (/MCDONALD|麥當勞/.test(s)) {
+    return '麥當勞';
+  }
+  if (/STARBUCKS|星巴克|悠旅生活/.test(s)) {
+    return '星巴克';
+  }
+  if (/SHOPEE|蝦皮/.test(s)) {
+    return '蝦皮購物';
   }
 
   // 移除尾端分店編號干擾（保留主要店名關鍵字）
@@ -1160,15 +1263,23 @@ function normalizeDateToken(rawDateStr, defaultYear) {
 }
 
 /**
- * 解析玉山銀行通知文字（支援 Email、Wallet 推播、簡訊、iOS 捷徑文字）
+ * 解析玉山銀行與台灣常見信用卡/簽帳金融卡通知文字（支援 Email、Wallet 推播、LINE 通知、簡訊、iOS/Android 捷徑文字）
  * 區分：
- *  - CHANNEL_A_AUTH (第 1 次通知：簽帳金融卡消費 / 授權 / 圈存)
- *  - CHANNEL_B_SETTLE (第 2 次通知：帳戶扣款 / 簽帳卡消費扣款 / 請款)
+ *  - CHANNEL_A_AUTH (第 1 次通知：信用卡刷卡 / 簽帳金融卡消費 / 授權 / 圈存)
+ *  - CHANNEL_B_SETTLE (第 2 次通知：帳戶扣款 / 簽帳卡消費扣款 / 商店請款 / 帳單請款)
  *  - SALARY_IN (薪資入帳通知)
  *  - REFUND (刷退 / 取消授權 / 解圈退回)
  */
 function parseEsunNotification(rawText, options = {}) {
-  const cleanText = toHalfWidth(String(rawText || '')).trim();
+  const cleanText = toHalfWidth(String(rawText || ''))
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\r\n/g, '\n')
+    .trim();
+
   if (!cleanText) {
     throw new Error('通知文字不可為空');
   }
@@ -1176,36 +1287,63 @@ function parseEsunNotification(rawText, options = {}) {
   const refDateStr = options.referenceDate || new Date().toISOString().slice(0, 10);
   const defaultYear = Number(refDateStr.slice(0, 4)) || new Date().getFullYear();
 
+  // 剔除銀行推播/信件末尾常見的「實際請款金額以帳單/商店請款為準」免責聲明，避免將通道 A 刷卡誤判為通道 B 請款
+  const textWithoutDisclaimer = cleanText
+    .replace(/(?:實際|最終)?(?:請款|扣款|入帳)金額以(?:帳單|特約商店|商店請款|實際請款|銀行帳單)[^。；\n]*/g, '')
+    .replace(/本筆交易為(?:授權|圈存)[^。；\n]*待(?:特約)?商店請款[^。；\n]*/g, '')
+    .replace(/待(?:特約)?商店請款後(?:始進行)?扣款/g, '')
+    .replace(/尚未請款|未請款/g, '');
+
   // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
   let channelType = 'CHANNEL_A_AUTH';
-  if (/薪資入帳|薪水入帳|薪資轉帳|薪轉入帳|發薪入帳/.test(cleanText)) {
+  if (/薪資入帳|薪水入帳|薪資轉帳|薪轉入帳|發薪入帳|薪資發放/.test(textWithoutDisclaimer)) {
     channelType = 'SALARY_IN';
-  } else if (/刷退|退貨|取消授權|解圈退回|沖銷入帳|退單/.test(cleanText)) {
+  } else if (/刷退|退貨|取消授權|解圈退回|沖銷入帳|退單|取消交易|退款/.test(textWithoutDisclaimer)) {
     channelType = 'REFUND';
-  } else if (/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際扣款|請款/.test(cleanText)) {
+  } else if (/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_B_SETTLE';
-  } else if (/簽帳金融卡消費|授權|刷卡|圈存|一般消費|消費通知/.test(cleanText)) {
+  } else if (/信用卡|簽帳金融卡|簽帳卡|玉山卡|授權|刷卡|圈存|一般消費|消費通知|消費金額|特店名稱|新增消費/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_A_AUTH';
+  } else if (/請款/.test(textWithoutDisclaimer)) {
+    channelType = 'CHANNEL_B_SETTLE';
   }
 
-  // 2. 擷取金額 (優先匹配 NT$ / TWD / 新台幣 / $ 與「...元」，並以負向後行斷言排除日期的年份 2026/10/20)
+  // 1.5 辨識卡別 (CREDIT 信用卡 vs DEBIT 簽帳金融卡) 與卡號末四碼
+  const cardType = /簽帳金融卡|簽帳卡|DEBIT|圈存|帳戶扣款/.test(cleanText) ? 'DEBIT' : 'CREDIT';
+  let cardLast4 = null;
+  const last4Match = cleanText.match(/(?:末四碼|末4碼|卡號末四碼|卡號|\*)\s*([0-9]{4})(?!\d)/);
+  if (last4Match) cardLast4 = last4Match[1];
+
+  // 1.6 擷取通知內附帶的「可用餘額」（若有），並從金額匹配字串中移除餘額與卡號干擾
+  let reportedAvailableBalance = null;
+  const balMatch = cleanText.match(/(?:可用餘額|帳戶可用餘額|帳戶餘額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?/i);
+  if (balMatch && balMatch[1]) {
+    reportedAvailableBalance = parseInt(balMatch[1].replace(/,/g, ''), 10);
+  }
+
+  const textForAmount = cleanText
+    .replace(/(?:可用餘額|帳戶可用餘額|帳戶餘額|剩餘額度|信用額度)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*[0-9,]+(?:\.[0-9]+)?\s*元?/gi, ' ')
+    .replace(/(?:卡號)?(?:末四碼|末4碼)[：:\s(（]*[0-9]{4}[)）]?/g, ' ');
+
+  // 2. 擷取金額 (支援整數與 .00 小數格式，優先匹配消費/扣款/金額標籤與 NT$/TWD/新臺幣，並排除日期年份)
   let amount = 0;
   const amountPatterns = [
-    /(?:NT\$|TWD|新台幣|臺幣|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?![0-9]*[\/\-年])/i,
-    /([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\s*元/,
-    /(?:金額|消費|扣款|入帳|刷退)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?![0-9]*[\/\-年月])/i
+    /(?:消費金額|刷卡金額|交易金額|實際請款扣款|請款扣款|實際扣款|扣款金額|請款金額|授權金額|入帳金額|刷退金額|金額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i,
+    /(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年:])/i,
+    /(?<![0-9.])([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?\s*元/,
+    /(?:消費|扣款|入帳|刷退|刷卡|授權)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i
   ];
   for (const pat of amountPatterns) {
-    const m = cleanText.match(pat);
+    const m = textForAmount.match(pat);
     if (m && m[1]) {
       amount = parseInt(m[1].replace(/,/g, ''), 10);
       break;
     }
   }
 
-  // 3. 擷取「原始消費日期（刷卡日）」與「通知/請款當日日期」
+  // 3. 擷取「原始消費日期（刷卡日）」、「通知/請款當日日期」與「精確刷卡時間 (HH:mm)」
   let originalTxDate = null;
-  const origDateMatch = cleanText.match(/(?:原始交易日|原交易日|原消費日|原始消費日|刷卡日|消費日期|交易日)[：:\s]*(\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?|\d{1,2}[\/\-月]\d{1,2}日?)/);
+  const origDateMatch = cleanText.match(/(?:原始交易日|原交易日|原消費日|原始消費日|刷卡日|消費日期|交易日期|交易日)[：:\s]*(\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?|\d{1,2}[\/\-月]\d{1,2}日?)/);
   if (origDateMatch) {
     originalTxDate = normalizeDateToken(origDateMatch[1], defaultYear);
   }
@@ -1223,17 +1361,25 @@ function parseEsunNotification(rawText, options = {}) {
     }
   }
 
+  let txTimeMinute = null;
+  const timeMatch = cleanText.match(/(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?/);
+  if (timeMatch) {
+    const parts = timeMatch[0].split(':');
+    txTimeMinute = `${String(parts[0]).padStart(2, '0')}:${String(parts[1]).padStart(2, '0')}`;
+  }
+
   // 4. 擷取授權碼 (若有)
   let authCode = null;
   const authMatch = cleanText.match(/(?:授權碼|Auth\s*Code)[：:\s]*([A-Z0-9]{4,8})/i);
   if (authMatch) authCode = authMatch[1].toUpperCase();
 
-  // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取商店標籤或於/在...消費結構)
+  // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取結構化欄位或於/在...消費結構)
+  const headerIgnoreRegex = /^(?:玉山銀行|玉山Wallet|玉山信用卡|玉山簽帳卡|簽帳金融卡|信用卡|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|一般消費)$/i;
   let rawMerchant = '未知商店';
   const quoteMatches = [...cleanText.matchAll(/[「『]([^」』]+)[」』]/g)];
   for (const qm of quoteMatches) {
     const candidate = qm[1].trim();
-    if (candidate && !/玉山銀行|玉山Wallet|簽帳金融卡|帳戶扣款|薪資入帳/.test(candidate)) {
+    if (candidate && !headerIgnoreRegex.test(candidate)) {
       rawMerchant = candidate;
       break;
     }
@@ -1241,15 +1387,15 @@ function parseEsunNotification(rawText, options = {}) {
 
   if (rawMerchant === '未知商店') {
     const merchantPatterns = [
-      /(?:商店名稱|特約商店|消費商店|請款商店|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新台幣|\$|\d+元|$))/i,
-      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新台幣)/i,
+      /(?:特店名稱|商店名稱|特約商店|消費商店|請款商店|交易地點|消費地點|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費金額|刷卡金額|交易金額|實際請款|一般消費|消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣|\$|\d+元|$))/i,
+      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:一般消費|刷卡消費|刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣)/i,
       /【([^】]+)】/
     ];
     for (const pat of merchantPatterns) {
       const m = cleanText.match(pat);
       if (m && m[1]) {
         const candidate = m[1].trim();
-        if (candidate && !/玉山銀行|玉山Wallet|簽帳金融卡|帳戶扣款|薪資入帳|^\d{4}/.test(candidate)) {
+        if (candidate && !headerIgnoreRegex.test(candidate) && !/^\d{4}/.test(candidate)) {
           rawMerchant = candidate;
           break;
         }
@@ -1265,13 +1411,17 @@ function parseEsunNotification(rawText, options = {}) {
 
   return {
     channelType,
+    cardType,
+    cardLast4,
     rawMerchant,
     normalizedMerchant,
     amount,
     txDate: originalTxDate || eventDate,
     originalTxDate, // null 代表通道 B 通知中未明確附帶原始刷卡日
     eventDate,
+    txTimeMinute,
     authCode,
+    reportedAvailableBalance,
     ...classification,
     rawText: cleanText
   };
@@ -1315,7 +1465,7 @@ function creditWalletTankFromTx(db, tankType, amount, note, txId, nowIso) {
   `).run(tankType, Number(amount), newBalance, note, txId, nowIso);
 }
 
-function checkDebounceDuplicate(db, dedupeHash, nowIso) {
+function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
   const nowMs = new Date(nowIso).getTime();
   const recentLogs = db.prepare(`
     SELECT id, received_at, linked_tx_id
@@ -1334,6 +1484,34 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso) {
       };
     }
   }
+
+  // 進階跨管道防重（例如：手機推播先到、Gmail 通知信稍後收進來，具有相同 Email UID、相同刷卡時間 HH:mm 或相同授權碼 AuthCode）
+  if (parsed && (parsed.authCode || parsed.txTimeMinute || parsed.emailUid)) {
+    if (parsed.emailUid) {
+      const logs = db.prepare('SELECT * FROM notification_logs ORDER BY id DESC LIMIT 100').all();
+      const uidTag = `[UID:${parsed.emailUid}]`;
+      const hitLog = logs.find(l => String(l.action_taken || '').includes(uidTag) || String(l.raw_text || '').includes(uidTag));
+      if (hitLog) {
+        return { isDuplicate: true, diffSeconds: 0, originalTxId: hitLog.linked_tx_id, reason: 'SAME_EMAIL_UID' };
+      }
+    }
+    const candidates = db.prepare(`
+      SELECT * FROM transactions
+      WHERE status IN ('PENDING', 'TEMP_HOLD') AND is_reconciled_locked = 0
+      ORDER BY tx_date ASC, tx_timestamp ASC, id ASC
+    `).all();
+    for (const tx of candidates) {
+      if (tx.tx_date !== parsed.txDate || Number(tx.auth_amount) !== Number(parsed.amount)) continue;
+      if (tx.normalized_merchant !== parsed.normalizedMerchant) continue;
+      if (parsed.authCode && tx.auth_code && parsed.authCode === tx.auth_code) {
+        return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_AUTH_CODE' };
+      }
+      if (parsed.txTimeMinute && tx.channel_a_raw && tx.channel_a_raw.includes(parsed.txTimeMinute)) {
+        return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_TX_TIME_MINUTE' };
+      }
+    }
+  }
+
   return { isDuplicate: false };
 }
 
@@ -1435,6 +1613,10 @@ function processBankNotification(db, rawText, options = {}) {
   const source = options.source || 'manual';
 
   const parsed = parseEsunNotification(rawText, { referenceDate: refDate });
+  if (options.emailUid) {
+    parsed.emailUid = String(options.emailUid);
+  }
+  const uidSuffix = parsed.emailUid ? ` [UID:${parsed.emailUid}]` : '';
   const cycle = ensureCurrentCycle(db, parsed.txDate || refDate);
   const dedupeHash = `${parsed.normalizedMerchant}|${parsed.amount}`;
 
@@ -1486,11 +1668,11 @@ function processBankNotification(db, rawText, options = {}) {
     }
   }
 
-  // 情境 3：通道 A（第 1 次通知：簽帳金融卡消費 / 授權圈存）
+  // 情境 3：通道 A（第 1 次通知：簽帳金融卡消費 / 授權圈存 / 信用卡刷卡）
   if (parsed.channelType === 'CHANNEL_A_AUTH') {
-    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso);
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
     if (debounce.isDuplicate) {
-      const ignoreMsg = `🛡️ 3分鐘防抖動鎖觸發：與 ${debounce.diffSeconds} 秒前之「${parsed.normalizedMerchant} $${parsed.amount}」完全相同，判定為銀行重複推播自動忽略！`;
+      const ignoreMsg = `🛡️ 防重複扣款鎖觸發：與既有「${parsed.normalizedMerchant} $${parsed.amount}」為同一筆刷卡通知，已自動忽略不重複扣款！${uidSuffix}`;
       db.prepare(`
         INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
         VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
@@ -1507,7 +1689,8 @@ function processBankNotification(db, rawText, options = {}) {
 
     let status = 'PENDING';
     let personalAmount = parsed.amount;
-    let reconcileNote = '圈存中（已立即從當月可用安全預算扣除）';
+    const cardLabel = parsed.cardType === 'CREDIT' ? '信用卡刷卡' : '簽帳卡圈存';
+    let reconcileNote = `${cardLabel}（已立即從當月可用安全預算精準扣除 $${parsed.amount}）${uidSuffix}`;
 
     if (parsed.isVerifyAuth) {
       status = 'AUTH_VERIFY';
@@ -2279,9 +2462,175 @@ try {
 } catch (_) {}
 const { processBankNotification } = require('./reconciliationEngine');
 
+const IMAP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatImapDate(dt) {
+  const d = String(dt.getDate()).padStart(2, '0');
+  const m = IMAP_MONTHS[dt.getMonth()];
+  const y = dt.getFullYear();
+  return `${d}-${m}-${y}`;
+}
+
+function base64ToUtf8(b64) {
+  const clean = String(b64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+  if (!clean) return '';
+  try {
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(clean, 'base64').toString('utf8');
+    }
+    if (typeof atob === 'function' && typeof TextDecoder !== 'undefined') {
+      const bin = atob(clean);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+  } catch (_) {}
+  return '';
+}
+
+function decodeQuotedPrintableUtf8(qp) {
+  const softJoined = String(qp || '').replace(/=\r?\n/g, '');
+  try {
+    const bytes = [];
+    for (let i = 0; i < softJoined.length; i++) {
+      if (softJoined[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(softJoined.slice(i + 1, i + 3))) {
+        bytes.push(parseInt(softJoined.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        bytes.push(softJoined.charCodeAt(i));
+      }
+    }
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(bytes).toString('utf8');
+    }
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+    }
+  } catch (_) {}
+  return softJoined;
+}
+
+function decodeRfc2047Word(str) {
+  return String(str || '').replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, _charset, enc, payload) => {
+    if (String(enc).toUpperCase() === 'B') {
+      return base64ToUtf8(payload);
+    }
+    return decodeQuotedPrintableUtf8(String(payload).replace(/_/g, ' '));
+  });
+}
+
+function stripHtmlTags(html) {
+  return String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|tr|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /**
- * 輕量級原生 TLS IMAP 玉山通知信讀取模組 (免外部套件依賴)
- * 亦支援接收 Gmail Apps Script / iOS 捷徑 Webhook 直接轉發
+ * 將原始 MIME 信件內容解碼為乾淨純文字（支援 Base64、Quoted-Printable、Multipart 與 HTML 表格）
+ */
+function decodeEmailMimeToText(rawMime) {
+  const raw = String(rawMime || '');
+  if (!raw.trim()) return '';
+
+  const decodedHeaders = decodeRfc2047Word(raw);
+  const subjectMatch = decodedHeaders.match(/^Subject:\s*(.+)$/im);
+  const subject = subjectMatch ? subjectMatch[1].trim() : '';
+
+  const decodedParts = [];
+  if (subject) decodedParts.push(subject);
+
+  const b64Blocks = raw.match(/(?:^[A-Za-z0-9+/]{40,76}\r?\n)+(?:[A-Za-z0-9+/=]{4,76})?/gm) || [];
+  for (const blk of b64Blocks) {
+    const txt = base64ToUtf8(blk);
+    if (txt && /[\u4e00-\u9fa5]|NT\$|TWD|消費|刷卡|扣款|玉山/.test(txt)) {
+      decodedParts.push(stripHtmlTags(txt));
+    }
+  }
+
+  if (/=[0-9A-F]{2}=[0-9A-F]{2}=[0-9A-F]{2}/i.test(raw)) {
+    const qpTxt = decodeQuotedPrintableUtf8(raw);
+    decodedParts.push(stripHtmlTags(qpTxt));
+  }
+
+  if (decodedParts.length <= 1) {
+    decodedParts.push(stripHtmlTags(decodedHeaders));
+  }
+
+  return decodedParts.join('\n').trim();
+}
+
+function isBankTransactionEmailText(text) {
+  const t = String(text || '');
+  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳/i.test(t);
+  const hasAmount = /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(t);
+  return hasBankOrCard && hasAmount;
+}
+
+function buildGoogleAppsScriptCode(webhookUrl) {
+  const targetUrl = webhookUrl || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook';
+  return `// ============================================================================
+// 🛡️ 防破產記帳系統 — Gmail 刷卡通知 24 小時雲端全自動偵測腳本 (Google Apps Script)
+// 設定步驟（只需設定一次，終身全自動，不需開電腦、不需手動貼上）：
+// 1. 前往 https://script.google.com 新增專案，貼上此程式碼並按 Ctrl+S 儲存
+// 2. 點選左側「觸發條件 (鬧鐘圖示)」➔「+ 新增觸發條件」
+//    - 執行函式：autoSyncCreditCardNotifications
+//    - 時間驅動 ➔ 分鐘計時器 ➔ 每分鐘 (或每 5 分鐘) ➔ 儲存
+// ============================================================================
+
+const WEBHOOK_URL = "${targetUrl}";
+
+function autoSyncCreditCardNotifications() {
+  const props = PropertiesService.getScriptProperties();
+  const syncedIds = JSON.parse(props.getProperty("SYNCED_MSG_IDS") || "[]");
+  const syncedSet = new Set(syncedIds);
+  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 薪資入帳)';
+  const threads = GmailApp.search(query, 0, 15);
+  let newSynced = false;
+
+  for (const thread of threads) {
+    for (const msg of thread.getMessages()) {
+      const msgId = msg.getId();
+      if (syncedSet.has(msgId)) continue;
+      const subject = msg.getSubject() || "";
+      const plainBody = msg.getPlainBody() || msg.getBody().replace(/<[^>]+>/g, " ");
+      const fullText = "【" + subject + "】\\n" + plainBody;
+      try {
+        UrlFetchApp.fetch(WEBHOOK_URL, {
+          method: "post",
+          contentType: "application/json",
+          payload: JSON.stringify({
+            source: "gmail_gas_cloud_auto",
+            emailUid: msgId,
+            timestamp: msg.getDate().toISOString(),
+            text: fullText
+          }),
+          muteHttpExceptions: true
+        });
+        syncedSet.add(msgId);
+        newSynced = true;
+      } catch (err) {}
+    }
+  }
+  if (newSynced) {
+    props.setProperty("SYNCED_MSG_IDS", JSON.stringify(Array.from(syncedSet).slice(-200)));
+  }
+}`;
+}
+
+/**
+ * 原生 TLS IMAP 玉山與信用卡通知信全自動掃描與對帳引擎 (免外部套件依賴)
  */
 async function pollEsunEmailsViaImap(db) {
   const settings = db.prepare('SELECT gmail_user, gmail_app_password FROM user_settings WHERE id = 1').get();
@@ -2289,7 +2638,9 @@ async function pollEsunEmailsViaImap(db) {
     return {
       ok: false,
       mode: 'NOT_CONFIGURED',
-      message: '尚未設定 Gmail 帳號與應用程式密碼（App Password）。您可於設定分頁填入，或直接使用 iOS 捷徑 Webhook / 介面手動貼上測試框。'
+      processedCount: 0,
+      newTransactions: [],
+      message: '尚未設定 Gmail 帳號與 16 碼應用程式密碼。您可填入設定開啟本機背景每分鐘自動掃描，或複製下方 Google Apps Script / iOS 捷徑開啟 24h 雲端全自動偵測。'
     };
   }
 
@@ -2297,36 +2648,116 @@ async function pollEsunEmailsViaImap(db) {
     return {
       ok: true,
       mode: 'CLOUD_WEBHOOK_READY',
-      message: '☁️ 目前運行於 Cloudflare 雲端環境，已儲存您的 Gmail 設定！雲端模式建議搭配上方 HTTPS Webhook 網址由 iOS 捷徑或 Google Apps Script 即時轉發玉山通知信。'
+      processedCount: 0,
+      newTransactions: [],
+      message: '☁️ 目前運行於 Cloudflare 雲端環境，已就緒接收自動推播！請搭配「Google Apps Script 雲端自動轉發」或「手機刷卡推播自動化」即可 24 小時全自動入帳。'
     };
   }
+
+  const cleanPass = String(settings.gmail_app_password).replace(/\s+/g, '');
 
   return new Promise(resolve => {
     try {
       const socket = tls.connect({ host: 'imap.gmail.com', port: 993, rejectUnauthorized: true });
       let buffer = '';
       let step = 0;
+      const processedResults = [];
 
       const timeout = setTimeout(() => {
         socket.destroy();
-        resolve({ ok: false, mode: 'TIMEOUT', message: 'Gmail IMAP 連線逾時，請確認網路與應用程式密碼。' });
-      }, 8000);
+        resolve({
+          ok: false,
+          mode: 'TIMEOUT',
+          processedCount: processedResults.length,
+          newTransactions: processedResults,
+          message: 'Gmail IMAP 連線逾時，請確認網路與 16 碼應用程式密碼。'
+        });
+      }, 12000);
 
       socket.on('data', chunk => {
         buffer += chunk.toString('utf8');
-        if (step === 0 && buffer.includes('OK')) {
+
+        if (step === 0 && /^\* OK/m.test(buffer)) {
           step = 1;
           buffer = '';
-          socket.write(`A1 LOGIN "${settings.gmail_user}" "${settings.gmail_app_password}"\r\n`);
-        } else if (step === 1 && buffer.includes('A1 ')) {
+          socket.write(`A1 LOGIN "${settings.gmail_user}" "${cleanPass}"\r\n`);
+        } else if (step === 1 && /^A1 (OK|NO|BAD)/m.test(buffer)) {
+          if (!/^A1 OK/m.test(buffer)) {
+            clearTimeout(timeout);
+            socket.write('A9 LOGOUT\r\n');
+            socket.end();
+            return resolve({
+              ok: false,
+              mode: 'AUTH_FAILED',
+              processedCount: 0,
+              newTransactions: [],
+              message: '❌ Gmail IMAP 登入失敗，請確認已開啟 Google 兩步驟驗證並填入 16 碼「應用程式密碼」。'
+            });
+          }
+          step = 2;
+          buffer = '';
+          socket.write('A2 SELECT INBOX\r\n');
+        } else if (step === 2 && /^A2 (OK|NO|BAD)/m.test(buffer)) {
+          step = 3;
+          buffer = '';
+          const sinceDt = new Date(Date.now() - 7 * 86400000);
+          socket.write(`A3 SEARCH SINCE ${formatImapDate(sinceDt)}\r\n`);
+        } else if (step === 3 && /^A3 (OK|NO|BAD)/m.test(buffer)) {
+          const searchMatch = buffer.match(/^\* SEARCH(?: (.+))?\r?$/m);
+          const seqNums = searchMatch && searchMatch[1]
+            ? searchMatch[1].trim().split(/\s+/).filter(Boolean).slice(-12)
+            : [];
+
+          buffer = '';
+          if (seqNums.length === 0) {
+            clearTimeout(timeout);
+            socket.write('A5 LOGOUT\r\n');
+            socket.end();
+            return resolve({
+              ok: true,
+              mode: 'IMAP_SYNCED',
+              processedCount: 0,
+              newTransactions: [],
+              message: '✅ 自動掃描完成：最近 7 天信箱內尚無新的刷卡或銀行通知信。'
+            });
+          }
+
+          step = 4;
+          const fetchSet = seqNums.join(',');
+          socket.write(`A4 FETCH ${fetchSet} (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODY.PEEK[TEXT])\r\n`);
+        } else if (step === 4 && /^A4 (OK|NO|BAD)/m.test(buffer)) {
           clearTimeout(timeout);
-          const success = buffer.includes('A1 OK');
-          socket.write('A2 LOGOUT\r\n');
+          const rawResponse = buffer;
+          buffer = '';
+          socket.write('A5 LOGOUT\r\n');
           socket.end();
+
+          const msgBlocks = rawResponse.split(/^\* \d+ FETCH /m).slice(1);
+          for (const block of msgBlocks) {
+            const uidMatch = block.match(/UID\s+(\d+)/i);
+            const uid = uidMatch ? uidMatch[1] : null;
+            const decodedText = decodeEmailMimeToText(block);
+            if (!isBankTransactionEmailText(decodedText)) continue;
+
+            try {
+              const res = processBankNotification(db, decodedText, {
+                source: 'gmail_imap_auto',
+                emailUid: uid || undefined
+              });
+              if (res && res.resultType !== 'DEBOUNCE_IGNORED') {
+                processedResults.push(res);
+              }
+            } catch (_) {}
+          }
+
           resolve({
-            ok: success,
-            mode: 'IMAP_CONNECTED',
-            message: success ? '✅ 成功透過 IMAP 驗證 Gmail 信箱並檢查玉山銀行通知信！' : '❌ Gmail IMAP 登入失敗，請確認已開啟兩步驟驗證並使用 16 碼應用程式密碼。'
+            ok: true,
+            mode: 'IMAP_SYNCED',
+            processedCount: processedResults.length,
+            newTransactions: processedResults,
+            message: processedResults.length > 0
+              ? `⚡ 全自動偵測成功！已從 Gmail 自動抓取並寫入 ${processedResults.length} 筆最新刷卡/入帳紀錄！`
+              : '✅ Gmail 信箱自動掃描完成（所有刷卡通知皆已同步，無重複扣款）。'
           });
         }
       });
@@ -2336,21 +2767,28 @@ async function pollEsunEmailsViaImap(db) {
         resolve({
           ok: true,
           mode: 'CLOUD_WEBHOOK_READY',
-          message: `☁️ 雲端環境不直接開放 TCP 993 埠 (${err.message})，已儲存帳號設定，請使用此頁顯示的 HTTPS Webhook 網址搭配 iOS 捷徑或 Gmail 自動轉發！`
+          processedCount: 0,
+          newTransactions: [],
+          message: `☁️ 雲端模式已儲存設定 (${err.message})，請搭配 Google Apps Script 或手機推播自動化即時入帳！`
         });
       });
-    } catch (err) {
+    } catch (_) {
       resolve({
         ok: true,
         mode: 'CLOUD_WEBHOOK_READY',
-        message: '☁️ 目前運行於 Cloudflare 雲端環境，請使用上方 HTTPS Webhook 網址搭配 iOS 捷徑即時推送玉山通知！'
+        processedCount: 0,
+        newTransactions: [],
+        message: '☁️ 目前運行於雲端環境，請使用自動轉發腳本或手機推播自動化即時推送刷卡通知！'
       });
     }
   });
 }
 
 module.exports = {
-  pollEsunEmailsViaImap
+  pollEsunEmailsViaImap,
+  decodeEmailMimeToText,
+  isBankTransactionEmailText,
+  buildGoogleAppsScriptCode
 };
 
   },
@@ -2362,7 +2800,7 @@ const { getSurvivalDashboardMetrics, syncCycleWithShiftData } = require('../serv
 const { processBankNotification, resolveGasTempHoldManually, markTransactionCanceled, scanGhostHolds } = require('../services/reconciliationEngine');
 const { getHighRiskModeStatus, evaluateImpulsePurchase, getCooldownCartSummary, fastForwardCooldownItem, resolveCooldownItem, getVampireAndSubscriptionRadar } = require('../services/impulseControlService');
 const { splitTransactionBill, settleSplitBill, getSplitBillsSummary, getWalletTankStatus, quickAdjustWalletTank, auditWalletTank, syncEsunAvailableBalance, splitUnknownGapTransaction } = require('../services/accountingPatchService');
-const { pollEsunEmailsViaImap } = require('../services/gmailImapService');
+const { pollEsunEmailsViaImap, decodeEmailMimeToText, buildGoogleAppsScriptCode } = require('../services/gmailImapService');
 
 /**
  * 首次啟動時若交易表為空，寫入貼近真實生活的預設展示資料（亦可隨時一鍵清空重置）
@@ -2470,6 +2908,12 @@ function buildFullDashboardSnapshot(db) {
       ...settings,
       gmail_app_password: settings.gmail_app_password ? '********' : ''
     },
+    automation: {
+      gmailAutoPollEnabled: Boolean(settings.gmail_user && settings.gmail_app_password),
+      shiftSyncSource: survival.cycle.shiftSyncSource,
+      lastShiftSyncedAt: survival.cycle.lastSyncedAt,
+      gasScriptCode: buildGoogleAppsScriptCode()
+    },
     survival,
     highRiskMode,
     ghostHolds,
@@ -2482,38 +2926,85 @@ function buildFullDashboardSnapshot(db) {
     balanceSyncLogs
   };
 }
+
 async function handleApiRequest(method, pathname, body = {}, searchParams, options = {}) {
   const db = options.db || getDb();
 
   if ((method === 'GET' || method === 'POST') && pathname === '/api/dashboard') {
+    if (body && body.autoShiftState) {
+      try {
+        syncCycleWithShiftData(db, { rawJsonPayload: body.autoShiftState, isAutoSync: true });
+      } catch (_) {}
+    }
     return { status: 200, data: { ok: true, ...buildFullDashboardSnapshot(db) } };
   }
 
-  // 1. 玉山銀行通知解析 (手動貼上 / iOS 捷徑 Webhook)
-  if (method === 'POST' && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook')) {
-    const rawText = body.text || body.rawText || body.message || '';
-    const source = pathname.endsWith('/webhook') ? (body.source || 'ios_shortcut_webhook') : (body.source || 'manual_ui');
+  // 1. 銀行與信用卡刷卡通知全自動接收與解析 (支援 iOS/Android 自動化推播 Webhook、Google Apps Script、Email MIME 與批次陣列)
+  if (method === 'POST' && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch')) {
+    const source = pathname.endsWith('/webhook')
+      ? (body.source || 'auto_webhook')
+      : (pathname.endsWith('/batch') ? (body.source || 'auto_batch_webhook') : (body.source || 'manual_ui'));
+
+    const batchList = Array.isArray(body.notifications)
+      ? body.notifications
+      : (Array.isArray(body.messages) ? body.messages : null);
+
+    if (batchList && batchList.length > 0) {
+      const results = [];
+      for (const item of batchList) {
+        const itemObj = typeof item === 'string' ? { text: item } : (item || {});
+        const text = itemObj.rawEmail
+          ? decodeEmailMimeToText(itemObj.rawEmail)
+          : (itemObj.text || itemObj.rawText || itemObj.message || itemObj.notification || '');
+        if (!String(text).trim()) continue;
+        try {
+          const r = processBankNotification(db, text, {
+            source: itemObj.source || source,
+            emailUid: itemObj.emailUid || itemObj.messageId || itemObj.uid,
+            timestamp: itemObj.timestamp || new Date().toISOString(),
+            referenceDate: itemObj.referenceDate || body.referenceDate
+          });
+          results.push(r);
+        } catch (_) {}
+      }
+      return {
+        status: 200,
+        data: {
+          ok: true,
+          processedCount: results.length,
+          results,
+          result: results[results.length - 1] || null,
+          dashboard: buildFullDashboardSnapshot(db)
+        }
+      };
+    }
+
+    const rawText = body.rawEmail
+      ? decodeEmailMimeToText(body.rawEmail)
+      : (body.text || body.rawText || body.message || body.notification || body.body || '');
     const result = processBankNotification(db, rawText, {
       source,
+      emailUid: body.emailUid || body.messageId || body.uid,
       timestamp: body.timestamp || new Date().toISOString(),
       referenceDate: body.referenceDate
     });
     return { status: 200, data: { ok: true, result, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 2. Gmail IMAP 主動收信測試
+  // 2. Gmail IMAP 主動與背景自動掃描
   if (method === 'POST' && pathname === '/api/notifications/gmail-poll') {
     const imapRes = await pollEsunEmailsViaImap(db);
     return { status: 200, data: { ok: true, imap: imapRes, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 3. 薪資設定與唯讀跨專案班表同步 (支援直接輸入實領薪資/總薪資/時薪，或貼上 shiftpay-v2 JSON)
-  if (method === 'POST' && pathname === '/api/shift/sync') {
+  // 3. 薪資設定與跨專案班表全自動同步 (支援 shift-pay-app 即時自動推送、外部目錄自動掃描、或手動微調)
+  if (method === 'POST' && (pathname === '/api/shift/sync' || pathname === '/api/shift/webhook')) {
     const cycle = syncCycleWithShiftData(db, {
-      rawJsonPayload: body.rawJsonPayload || null,
+      rawJsonPayload: body.rawJsonPayload || body.shiftState || body.payload || null,
       manualNetSalary: body.manualNetSalary,
       manualGrossPay: body.manualGrossPay,
       manualHourlyWage: body.manualHourlyWage,
+      isAutoSync: Boolean(body.autoSync),
       referenceDateStr: body.referenceDate || null
     });
     const effective = cycle.is_salary_settled && cycle.actual_salary !== null ? cycle.actual_salary : cycle.estimated_net_pay;
@@ -2521,7 +3012,7 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
       status: 200,
       data: {
         ok: true,
-        message: `✅ 已更新本月薪資設定！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
+        message: `✅ 已自動同步本月薪資與班表！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
         cycle,
         dashboard: buildFullDashboardSnapshot(db)
       }
