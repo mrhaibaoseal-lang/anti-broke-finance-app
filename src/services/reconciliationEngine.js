@@ -28,7 +28,7 @@ function creditWalletTankFromTx(db, tankType, amount, note, txId, nowIso) {
 function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
   const nowMs = new Date(nowIso).getTime();
   const recentLogs = db.prepare(`
-    SELECT id, received_at, linked_tx_id
+    SELECT id, received_at, linked_tx_id, raw_text
     FROM notification_logs
     WHERE channel_type = 'CHANNEL_A_AUTH' AND dedupe_hash = ?
     ORDER BY id DESC LIMIT 5
@@ -41,6 +41,14 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
         isDuplicate: true,
         diffSeconds: Math.round(diffMs / 1000),
         originalTxId: log.linked_tx_id
+      };
+    }
+    if (parsed && parsed.txTimeMinute && log.raw_text && log.raw_text.includes(parsed.txTimeMinute)) {
+      return {
+        isDuplicate: true,
+        diffSeconds: Math.round(diffMs / 1000),
+        originalTxId: log.linked_tx_id,
+        reason: 'SAME_TX_TIME_MINUTE'
       };
     }
   }
@@ -190,20 +198,105 @@ function processBankNotification(db, rawText, options = {}) {
   const cycle = ensureCurrentCycle(db, parsed.txDate || refDate);
   const dedupeHash = `${parsed.normalizedMerchant}|${parsed.amount}`;
 
-  // 情境 1：玉山薪資入帳通知 -> 自動以真實入帳金額覆蓋當月預估值
+  // 情境 1：玉山薪資入帳通知 -> 自動以真實入帳金額覆蓋當月預估值，並同步寫入存款紀錄
   if (parsed.channelType === 'SALARY_IN') {
     const updatedCycle = applyActualSalaryDeposit(db, parsed.amount, refDate);
     const actionMsg = `💰 薪資入帳自動校正：以真實薪資 $${parsed.amount} 覆蓋原預估實領 ($${cycle.estimated_net_pay})`;
+    const salTxRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'DEPOSIT', ?, ?, '薪資入帳', ?, ?, 0, ?, 0, ?, ?, ?, NULL, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
+      parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, actionMsg, rawText, nowIso
+    );
+    const salTxId = Number(salTxRes.lastInsertRowid);
     db.prepare(`
       INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-      VALUES (?, 'SALARY_IN', ?, ?, ?, ?, NULL, ?, ?)
-    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, actionMsg, rawText, nowIso);
+      VALUES (?, 'SALARY_IN', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, actionMsg, salTxId, rawText, nowIso);
 
     return {
       resultType: 'SALARY_CALIBRATED',
       channelType: 'SALARY_IN',
       message: actionMsg,
       cycle: updatedCycle,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(salTxId),
+      parsed
+    };
+  }
+
+  // 情境 1.5：金融卡 ATM 存款 / 跨行存款 / 無卡存款 / 帳戶入帳通知 -> 自動新增 DEPOSIT 存款紀錄並計入本月可用資金池
+  if (parsed.channelType === 'DEPOSIT_IN') {
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
+    if (debounce.isDuplicate) {
+      const ignoreMsg = `🛡️ 防重複入帳鎖觸發：與既有「${parsed.normalizedMerchant} +$${parsed.amount}」為同一筆存款通知，已自動忽略不重複累加！${uidSuffix}`;
+      db.prepare(`
+        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
+      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+
+      return {
+        resultType: 'DEBOUNCE_IGNORED',
+        channelType: 'DEPOSIT_IN',
+        message: ignoreMsg,
+        originalTxId: debounce.originalTxId,
+        parsed
+      };
+    }
+
+    let depositNote = `🏧 金融卡存款自動入帳 +$${parsed.amount.toLocaleString()}（已直接計入本月可用預算池）${uidSuffix}`;
+    if (options.deductFromWalletCash) {
+      const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+      if (tank) {
+        const curCash = Number(tank.cash_balance) || 0;
+        const newCash = Math.max(0, curCash - Number(parsed.amount));
+        const actualDeducted = curCash - newCash;
+        db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+        db.prepare(`
+          INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+          VALUES ('CASH', ?, ?, ?, NULL, ?)
+        `).run(-actualDeducted, newCash, `🏧 拿皮包現金去 ATM 存入金融卡 -$${parsed.amount}`, nowIso);
+        depositNote = `🏧 領現轉存金融卡 +$${parsed.amount.toLocaleString()}（已同步從皮包現金扣除並轉入金融卡可用預算）${uidSuffix}`;
+      }
+    }
+
+    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+        .run(parsed.reportedAvailableBalance, nowIso);
+    }
+
+    const depRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'DEPOSIT', ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant, parsed.category || 'ATM存款',
+      parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, parsed.authCode, depositNote, rawText, nowIso
+    );
+
+    const depTxId = Number(depRes.lastInsertRowid);
+    // 亦用 CHANNEL_A_AUTH 相容標籤寫入或保留 DEPOSIT_IN 供 3 分鐘防抖動比對
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'CHANNEL_A_AUTH', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, depositNote, depTxId, rawText, nowIso);
+
+    return {
+      resultType: 'DEPOSIT_RECORDED',
+      channelType: 'DEPOSIT_IN',
+      message: depositNote,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(depTxId),
       parsed
     };
   }

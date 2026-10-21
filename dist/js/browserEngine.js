@@ -254,20 +254,33 @@ class PortableSqliteDb {
     }
 
     if (/AS\s+total_spent/i.test(sql) && /FROM\s+transactions\s+WHERE\s+cycle_key\s*=\s*\?/i.test(sql)) {
-      const [refDate, cycleKey] = params;
+      const refDate = params[0];
+      const cycleKey = params[params.length - 1];
       const rows = this.tables.transactions.filter(t => String(t.cycle_key) === String(cycleKey));
-      let total_spent = 0, pending_spent = 0, settled_spent = 0, gap_spent = 0, today_spent = 0;
+      let total_spent = 0, pending_spent = 0, settled_spent = 0, cash_spent = 0, gap_spent = 0, today_spent = 0;
+      let total_deposited = 0, atm_deposited = 0, deposit_count = 0, today_deposited = 0;
       for (const t of rows) {
         const amt = Number(t.personal_amount) || 0;
-        if (['PENDING', 'SETTLED', 'UNKNOWN_GAP'].includes(t.status)) {
+        const effAmt = Number(t.effective_amount) || 0;
+        if (['PENDING', 'SETTLED', 'UNKNOWN_GAP', 'CASH_SPENT'].includes(t.status)) {
           total_spent += amt;
           if (t.tx_date === refDate) today_spent += amt;
         }
         if (t.status === 'PENDING') pending_spent += amt;
-        if (t.status === 'SETTLED') settled_spent += amt;
+        if (['SETTLED', 'CASH_SPENT'].includes(t.status)) settled_spent += amt;
+        if (t.status === 'CASH_SPENT') cash_spent += effAmt;
         if (t.status === 'UNKNOWN_GAP') gap_spent += amt;
+        if (t.status === 'DEPOSIT') {
+          total_deposited += effAmt;
+          if (t.category !== '薪資入帳') atm_deposited += effAmt;
+          deposit_count += 1;
+          if (t.tx_date === refDate) today_deposited += effAmt;
+        }
       }
-      return { total_spent, pending_spent, settled_spent, gap_spent, today_spent };
+      return {
+        total_spent, pending_spent, settled_spent, cash_spent, gap_spent, today_spent,
+        total_deposited, atm_deposited, deposit_count, today_deposited
+      };
     }
 
     const id1 = sql.match(/^SELECT\s+[\s\S]+?\s+FROM\s+(user_settings|wallet_tank)\s+WHERE\s+id\s*=\s*1$/i);
@@ -357,7 +370,7 @@ class PortableSqliteDb {
         .filter(l => l.channel_type === 'CHANNEL_A_AUTH' && l.dedupe_hash === hash)
         .sort((a, b) => b.id - a.id)
         .slice(0, 5)
-        .map(l => ({ id: l.id, received_at: l.received_at, linked_tx_id: l.linked_tx_id }));
+        .map(l => ({ id: l.id, received_at: l.received_at, linked_tx_id: l.linked_tx_id, raw_text: l.raw_text }));
     }
 
     if (/FROM\s+transactions\s+WHERE\s+status\s+IN\s*\('PENDING',\s*'TEMP_HOLD'\)\s+AND\s+is_reconciled_locked\s*=\s*0/i.test(sql)) {
@@ -382,7 +395,7 @@ class PortableSqliteDb {
       const [startStr, endStr] = params;
       return this.tables.transactions
         .filter(t =>
-          ['PENDING', 'SETTLED'].includes(t.status) &&
+          ['PENDING', 'SETTLED', 'CASH_SPENT'].includes(t.status) &&
           Number(t.effective_amount) > 0 &&
           Number(t.effective_amount) < 200 &&
           String(t.tx_date) >= String(startStr) &&
@@ -766,8 +779,54 @@ function calculateEstimatedNetPay(grossPay, netPayFactor = 0.95, laborHealthDedu
   return Math.max(0, Math.round(grossPay * factor) - deduction);
 }
 
+function computeShiftPayForExactMonth(shiftState, exactYearMonth) {
+  const settings = (shiftState && shiftState.settings) || {};
+  const hourlyWage = Number(settings.hourlyWage) || 200;
+  const otMultiplier = Number.isFinite(Number(settings.otMultiplier)) ? Number(settings.otMultiplier) : 1;
+  const roundingMode = settings.roundingMode || 'monthly';
+  const attendanceBonus = Number(settings.attendanceBonus) || 0;
+  const shifts = (shiftState && shiftState.shifts) || {};
+
+  const ym = String(exactYearMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
+  const prefix = ym + '-';
+  const days = Object.keys(shifts).filter(k => k.startsWith(prefix)).sort();
+  const ratePerMin = hourlyWage / 60;
+  let nMin = 0, oMin = 0, otDailySum = 0, leaveCount = 0;
+
+  for (const key of days) {
+    const sh = shifts[key];
+    if (!sh) continue;
+    const nm = isUnpaid(sh) ? 0 : Math.max(0, spanMin(sh.start, sh.end) - (Number(sh.breakMin) || 0));
+    const om = isUnpaid(sh) ? 0 : Math.max(0, Math.floor(Number(sh.otMin) || 0));
+    nMin += nm;
+    oMin += om;
+    otDailySum += Math.round(om * ratePerMin * otMultiplier);
+    if (sh.status === 'leave') leaveCount++;
+  }
+
+  const normalPay = Math.round(nMin * ratePerMin);
+  const otPay = roundingMode === 'daily' ? otDailySum : Math.round(oMin * ratePerMin * otMultiplier);
+  const bonusOk = days.length > 0 && leaveCount === 0;
+  const bonusPay = bonusOk ? attendanceBonus : 0;
+
+  return {
+    month: ym,
+    employee: settings.myName || '王凱弘',
+    hourlyWage,
+    totalPay: normalPay + otPay + bonusPay,
+    normalPay,
+    normalHours: Number((nMin / 60).toFixed(2)),
+    otPay,
+    otMinutes: oMin,
+    bonusOk,
+    bonusPay,
+    shiftCount: days.length
+  };
+}
+
 module.exports = {
   computeShiftPayFromFullState,
+  computeShiftPayForExactMonth,
   parseShiftPayload,
   saveLatestShiftSyncCache,
   readExternalShiftDirectory,
@@ -778,10 +837,16 @@ module.exports = {
   "survivalEngine": function(module, exports, require) {
 'use strict';
 
-const { readExternalShiftDirectory, parseShiftPayload, saveLatestShiftSyncCache, calculateEstimatedNetPay } = require('./shiftSyncService');
+const { readExternalShiftDirectory, parseShiftPayload, saveLatestShiftSyncCache, calculateEstimatedNetPay, computeShiftPayForExactMonth } = require('./shiftSyncService');
 
 function pad2(n) {
   return String(n).padStart(2, '0');
+}
+
+function getPreviousYearMonth(ymStr) {
+  const [y, m] = String(ymStr || '2026-10').slice(0, 7).split('-').map(Number);
+  if (!y || !m) return '2026-09';
+  return m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`;
 }
 
 function formatYMD(dt) {
@@ -1009,25 +1074,100 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
   const refDate = (referenceDateStr || getTaipeiTodayYMD()).slice(0, 10);
   const cycle = ensureCurrentCycle(db, refDate);
 
-  const effectiveIncome = cycle.is_salary_settled && cycle.actual_salary !== null
-    ? Number(cycle.actual_salary)
-    : Number(cycle.estimated_net_pay);
+  let parsedRawShiftPayload = null;
+  if (cycle.raw_shift_payload) {
+    try {
+      parsedRawShiftPayload = JSON.parse(cycle.raw_shift_payload);
+    } catch (_) {}
+  }
+
+  // 時間對照模式：預設為 NEXT_MONTH_PAY（次月發薪制：這個月上班排班 ➔ 下個月發薪日才領；目前週期花的是上個月班表或目前已領薪水）
+  const mappingMode = settings.llm_api_key === 'SAME_MONTH_PAY' ? 'SAME_MONTH_PAY' : 'NEXT_MONTH_PAY';
+  const accumulatingShiftMonth = cycle.target_shift_month; // 例如 2026-10（目前正在上班累積的班表月份）
+  const earnedShiftMonth = getPreviousYearMonth(accumulatingShiftMonth); // 例如 2026-09（上個月上班、已於本週期發薪日入帳的班表月份）
+
+  const fullState = parsedRawShiftPayload?.fullState || null;
+  const prevMonthShift = fullState
+    ? computeShiftPayForExactMonth(fullState, earnedShiftMonth)
+    : { month: earnedShiftMonth, hourlyWage: cycle.hourly_wage || 200, totalPay: 0, normalPay: 0, normalHours: 0, otPay: 0, otMinutes: 0, bonusOk: false, bonusPay: 0, shiftCount: 0 };
+  const currMonthShift = fullState
+    ? computeShiftPayForExactMonth(fullState, accumulatingShiftMonth)
+    : {
+        month: accumulatingShiftMonth,
+        hourlyWage: cycle.hourly_wage || 200,
+        totalPay: Number(cycle.shift_gross_pay) || 0,
+        normalPay: Number(cycle.shift_gross_pay) || 0,
+        normalHours: Number(cycle.normal_hours) || 0,
+        otPay: 0,
+        otMinutes: Number(cycle.ot_minutes) || 0,
+        bonusOk: Number(cycle.bonus_pay) > 0,
+        bonusPay: Number(cycle.bonus_pay) || 0,
+        shiftCount: Number(parsedRawShiftPayload?.shiftCount) || 0
+      };
+
+  const prevMonthEstNet = calculateEstimatedNetPay(prevMonthShift.totalPay, settings.net_pay_factor, settings.labor_health_deduction);
+  const currMonthEstNet = calculateEstimatedNetPay(currMonthShift.totalPay, settings.net_pay_factor, settings.labor_health_deduction);
 
   const fixedRow = db.prepare('SELECT COALESCE(SUM(monthly_amount), 0) AS total_fixed FROM fixed_expenses WHERE is_active = 1').get();
   const fixedAndInstallments = Number(fixedRow.total_fixed) || 0;
 
   const spentRow = db.prepare(`
     SELECT
-      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP') THEN personal_amount ELSE 0 END), 0) AS total_spent,
+      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP', 'CASH_SPENT') THEN personal_amount ELSE 0 END), 0) AS total_spent,
       COALESCE(SUM(CASE WHEN status = 'PENDING' THEN personal_amount ELSE 0 END), 0) AS pending_spent,
-      COALESCE(SUM(CASE WHEN status = 'SETTLED' THEN personal_amount ELSE 0 END), 0) AS settled_spent,
+      COALESCE(SUM(CASE WHEN status IN ('SETTLED', 'CASH_SPENT') THEN personal_amount ELSE 0 END), 0) AS settled_spent,
+      COALESCE(SUM(CASE WHEN status = 'CASH_SPENT' THEN effective_amount ELSE 0 END), 0) AS cash_spent,
       COALESCE(SUM(CASE WHEN status = 'UNKNOWN_GAP' THEN personal_amount ELSE 0 END), 0) AS gap_spent,
-      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP') AND tx_date = ? THEN personal_amount ELSE 0 END), 0) AS today_spent
+      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP', 'CASH_SPENT') AND tx_date = ? THEN personal_amount ELSE 0 END), 0) AS today_spent,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' THEN effective_amount ELSE 0 END), 0) AS total_deposited,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' AND category != '薪資入帳' THEN effective_amount ELSE 0 END), 0) AS atm_deposited,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' THEN 1 ELSE 0 END), 0) AS deposit_count,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' AND tx_date = ? THEN effective_amount ELSE 0 END), 0) AS today_deposited
     FROM transactions WHERE cycle_key = ?
-  `).get(refDate, cycle.cycle_key);
+  `).get(refDate, refDate, cycle.cycle_key);
 
   const totalSpent = Number(spentRow.total_spent) || 0;
   const todaySpent = Number(spentRow.today_spent) || 0;
+  const totalDeposited = Number(spentRow.total_deposited) || 0;
+  const atmDeposited = Number(spentRow.atm_deposited) || 0;
+  const depositCount = Number(spentRow.deposit_count) || 0;
+  const todayDeposited = Number(spentRow.today_deposited) || 0;
+  const cashSpent = Number(spentRow.cash_spent) || 0;
+
+  let effectiveIncome;
+  let activeSourceType;
+  let activeSourceLabel;
+
+  if (cycle.is_salary_settled && cycle.actual_salary !== null) {
+    effectiveIncome = Number(cycle.actual_salary) + atmDeposited;
+    activeSourceType = atmDeposited > 0 ? 'ATM_AND_BASE' : 'MANUAL_SETTLED';
+    activeSourceLabel = atmDeposited > 0
+      ? `🏧 金融卡存款 ($${atmDeposited.toLocaleString()}) ＋ 初始預算 ($${Number(cycle.actual_salary).toLocaleString()})`
+      : `手動設定目前已領薪資 ($${effectiveIncome.toLocaleString()})`;
+  } else if (atmDeposited > 0) {
+    effectiveIncome = atmDeposited;
+    activeSourceType = 'ATM_DEPOSIT';
+    activeSourceLabel = `🏧 金融卡存款累計 ($${atmDeposited.toLocaleString()} · 共 ${depositCount} 筆)`;
+  } else if (fullState) {
+    if (mappingMode === 'NEXT_MONTH_PAY') {
+      effectiveIncome = prevMonthEstNet;
+      if (prevMonthShift.shiftCount > 0 || prevMonthShift.totalPay > 0) {
+        activeSourceType = 'PREV_MONTH_SHIFT';
+        activeSourceLabel = `${earnedShiftMonth} 上月班表（${cycle.start_date.slice(5).replace('-', '/')} 已發薪）`;
+      } else {
+        activeSourceType = 'AWAITING_CURRENT_BUDGET';
+        activeSourceLabel = `待存入金融卡或設定目前預算（${accumulatingShiftMonth} 班表為領現參考）`;
+      }
+    } else {
+      effectiveIncome = currMonthShift.totalPay > 0 ? currMonthEstNet : Number(cycle.estimated_net_pay);
+      activeSourceType = 'CURR_MONTH_SHIFT';
+      activeSourceLabel = `${accumulatingShiftMonth} 本月班表（當月直接抵用）`;
+    }
+  } else {
+    effectiveIncome = Number(cycle.estimated_net_pay);
+    activeSourceType = 'ESTIMATED_SUMMARY';
+    activeSourceLabel = '預估實領薪資';
+  }
 
   const startMs = new Date(`${cycle.start_date}T00:00:00`).getTime();
   const endMs = new Date(`${cycle.end_date}T00:00:00`).getTime();
@@ -1047,7 +1187,7 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
 
   let projectedBrokeDate = null, daysUntilBroke = null, overdraftDays = 0, bankruptcyWarningText = null;
   const effectiveBurnVelocity = Math.max(avgDailyBurnRate, todaySpent);
-  const isInitialZeroState = effectiveIncome === 0 && fixedAndInstallments === 0 && totalSpent === 0;
+  const isInitialZeroState = effectiveIncome === 0 && fixedAndInstallments === 0 && totalSpent === 0 && totalDeposited === 0;
 
   if (!isInitialZeroState && remainingBudget <= 0) {
     daysUntilBroke = 0;
@@ -1070,23 +1210,64 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
   const tier = isInitialZeroState
     ? {
         code: 'WEALTHY',
-        emoji: '✨',
-        label: '初始待設定狀態',
-        rangeText: '請輸入本月薪資',
+        emoji: '🏧',
+        label: '等待 ATM 存款或登記現金',
+        rangeText: '自動偵測金融卡存款',
         themeColor: 'emerald',
-        advice: '帳本已歸零為初始狀態！請點選右上角「💰 設定薪資 / 班表同步」輸入您目前的薪資與時薪，並新增您的固定扣款與消費。'
+        advice: '💡 領現金再去 ATM 存進金融卡時，系統會自動偵測玉山「存款通知」並累加可用預算！你也可以在下方直接登記皮包現金與悠遊卡消費。'
       }
     : evaluateSurvivalTier(dailySafeBudget);
 
-  let parsedRawShiftPayload = null;
-  if (cycle.raw_shift_payload) {
-    try {
-      parsedRawShiftPayload = JSON.parse(cycle.raw_shift_payload);
-    } catch (_) {}
-  }
+  // 計算下個發薪週期 (Next Payday Cycle) 供時間對照顯示
+  const endDtNext = new Date(`${cycle.end_date}T00:00:00`);
+  endDtNext.setDate(endDtNext.getDate() + 1);
+  const nextPaydayDateStr = formatYMD(endDtNext);
+  const nextRange = getCycleRangeForDate(nextPaydayDateStr, settings.payday_day);
+  const nextStartMs = new Date(`${nextRange.startDate}T00:00:00`).getTime();
+  const nextEndMs = new Date(`${nextRange.endDate}T00:00:00`).getTime();
+  const nextTotalCycleDays = Math.max(1, Math.round((nextEndMs - nextStartMs) / 86400000) + 1);
+  const projectedNextDisposable = Math.max(0, currMonthEstNet - fixedAndInstallments);
+  const projectedNextDailySafe = Math.floor(projectedNextDisposable / nextTotalCycleDays);
+
+  const timeMapping = {
+    mappingMode,
+    realToday: refDate,
+    paydayDay: settings.payday_day,
+    currentCycle: {
+      cycleKey: cycle.cycle_key,
+      startDate: cycle.start_date,
+      endDate: cycle.end_date,
+      paydayDate: cycle.start_date,
+      daysRemaining,
+      earnedShiftMonth,
+      prevMonthShift: {
+        ...prevMonthShift,
+        estimatedNetPay: prevMonthEstNet
+      },
+      activeSourceType,
+      activeSourceLabel,
+      effectiveIncome
+    },
+    upcomingCycle: {
+      workMonth: accumulatingShiftMonth,
+      paydayDate: nextRange.startDate,
+      cycleStartDate: nextRange.startDate,
+      cycleEndDate: nextRange.endDate,
+      totalCycleDays: nextTotalCycleDays,
+      daysUntilPayday: daysRemaining,
+      currMonthShift: {
+        ...currMonthShift,
+        estimatedNetPay: currMonthEstNet
+      },
+      fixedAndInstallments,
+      projectedDisposable: projectedNextDisposable,
+      projectedDailySafe: projectedNextDailySafe
+    }
+  };
 
   return {
     referenceDate: refDate,
+    timeMapping,
     cycle: {
       cycleKey: cycle.cycle_key, startDate: cycle.start_date, endDate: cycle.end_date,
       paydayDay: settings.payday_day, totalCycleDays, daysElapsed, daysRemaining,
@@ -1101,6 +1282,7 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
     },
     budget: {
       effectiveIncome, fixedAndInstallments, disposablePool, totalSpent,
+      totalDeposited, atmDeposited, depositCount, todayDeposited, cashSpent,
       pendingSpent: Number(spentRow.pending_spent) || 0, settledSpent: Number(spentRow.settled_spent) || 0,
       gapSpent: Number(spentRow.gap_spent) || 0, todaySpent, remainingBudget, dailySafeBudget,
       idealDailyBudget, avgDailyBurnRate, isTodayOverspent: isInitialZeroState ? false : isTodayOverspent, overdraftDays,
@@ -1219,6 +1401,18 @@ function normalizeMerchant(rawMerchant) {
   if (/SHOPEE|蝦皮/.test(s)) {
     return '蝦皮購物';
   }
+  if (/玉山\s*ATM\s*無卡存款|無卡存款/.test(s)) {
+    return '玉山 ATM 無卡存款';
+  }
+  if (/玉山\s*ATM\s*現金存款|玉山\s*ATM\s*存款|ATM\s*現金存款|ATM\s*存款|ATM\s*存入|自動化設備存款|跨行存款/.test(s)) {
+    return '玉山 ATM 存款';
+  }
+  if (/玉山帳戶轉帳入帳|轉帳入帳|轉帳存入|匯款入帳/.test(s)) {
+    return '玉山帳戶轉帳入帳';
+  }
+  if (/玉山金融卡存款/.test(s)) {
+    return '玉山金融卡存款';
+  }
 
   // 移除尾端分店編號干擾（保留主要店名關鍵字）
   s = s.replace(/\s+(股份有限公司|有限公司)$/g, '').trim();
@@ -1254,25 +1448,37 @@ function computeMerchantSimilarity(merchantA, merchantB) {
 /**
  * 自動推斷消費分類與特殊標記
  */
-function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
+function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText, channelType = null) {
   const combined = `${rawMerchant} ${normalizedMerchant} ${rawText || ''}`.toUpperCase();
 
   const isVerifyAuth = amount === 1 || amount === 2;
   const isGasStation = /中油|加油站|全國加油|台亞|速邁樂|台塑石油/.test(combined);
   const isGasPreAuth = isGasStation && (amount === 1500 || amount === 2250);
 
+  const isDeposit = channelType === 'DEPOSIT_IN' || channelType === 'SALARY_IN' || (
+    /ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯|轉帳入帳|轉帳存入|匯款入帳|收到轉帳/.test(combined) &&
+    !/提款|提領|刷退|取消授權|請款入帳|帳單請款/.test(combined)
+  );
+
   let walletTankType = null;
-  if (/自動加值|悠遊卡|EASYCARD|全支付|IPASS\s*MONEY|一卡通MONEY|街口儲值/.test(combined)) {
-    walletTankType = 'EASYCARD';
-  } else if (/ATM|提款|現金提領|跨行提款|無卡提款/.test(combined)) {
-    walletTankType = 'CASH';
+  if (!isDeposit) {
+    if (/自動加值|悠遊卡|EASYCARD|全支付|IPASS\s*MONEY|一卡通MONEY|街口儲值/.test(combined)) {
+      walletTankType = 'EASYCARD';
+    } else if (/ATM\s*提款|ATM\s*提領|提款|現金提領|跨行提款|無卡提款/.test(combined) || (/ATM/.test(combined) && !/存款|存入|入帳/.test(combined))) {
+      walletTankType = 'CASH';
+    }
   }
 
-  const isApplePay = /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
-  const isForeignTx = /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
+  const isApplePay = !isDeposit && /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
+  const isForeignTx = !isDeposit && /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
 
   let category = '一般消費';
-  if (isVerifyAuth) category = '綁卡驗證';
+  if (channelType === 'SALARY_IN' || /薪資入帳|薪水入帳|薪資轉帳/.test(combined)) category = '薪資入帳';
+  else if (isDeposit) {
+    if (/轉帳|匯款/.test(combined) && !/ATM|無卡存款|現金存/.test(combined)) category = '轉帳入帳';
+    else category = 'ATM存款';
+  }
+  else if (isVerifyAuth) category = '綁卡驗證';
   else if (isGasStation) category = '加油交通';
   else if (walletTankType === 'EASYCARD') category = '自動加值/儲值';
   else if (walletTankType === 'CASH') category = 'ATM提款';
@@ -1284,6 +1490,7 @@ function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
 
   return {
     category,
+    isDeposit,
     isApplePay,
     isVerifyAuth,
     isGasStation,
@@ -1342,12 +1549,17 @@ function parseEsunNotification(rawText, options = {}) {
     .replace(/待(?:特約)?商店請款後(?:始進行)?扣款/g, '')
     .replace(/尚未請款|未請款/g, '');
 
-  // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
+  // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > ATM存款/帳戶入帳 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
   let channelType = 'CHANNEL_A_AUTH';
   if (/薪資入帳|薪水入帳|薪資轉帳|薪轉入帳|發薪入帳|薪資發放/.test(textWithoutDisclaimer)) {
     channelType = 'SALARY_IN';
   } else if (/刷退|退貨|取消授權|解圈退回|沖銷入帳|退單|取消交易|退款/.test(textWithoutDisclaimer)) {
     channelType = 'REFUND';
+  } else if (
+    /ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯通知|轉帳入帳|轉帳存入|匯款入帳|收到轉帳|存入金額|存款金額|存入\s*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$|\d)/i.test(textWithoutDisclaimer) &&
+    !/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款|一般消費|刷卡消費|感應刷卡|提款|提領/.test(textWithoutDisclaimer)
+  ) {
+    channelType = 'DEPOSIT_IN';
   } else if (/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_B_SETTLE';
   } else if (/信用卡|簽帳金融卡|簽帳卡|玉山卡|授權|刷卡|圈存|一般消費|消費通知|消費金額|特店名稱|新增消費/.test(textWithoutDisclaimer)) {
@@ -1373,13 +1585,13 @@ function parseEsunNotification(rawText, options = {}) {
     .replace(/(?:可用餘額|帳戶可用餘額|帳戶餘額|剩餘額度|信用額度)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*[0-9,]+(?:\.[0-9]+)?\s*元?/gi, ' ')
     .replace(/(?:卡號)?(?:末四碼|末4碼)[：:\s(（]*[0-9]{4}[)）]?/g, ' ');
 
-  // 2. 擷取金額 (支援整數與 .00 小數格式，優先匹配消費/扣款/金額標籤與 NT$/TWD/新臺幣，並排除日期年份)
+  // 2. 擷取金額 (支援整數與 .00 小數格式，優先匹配消費/扣款/存款/金額標籤與 NT$/TWD/新臺幣，並排除日期年份)
   let amount = 0;
   const amountPatterns = [
-    /(?:消費金額|刷卡金額|交易金額|實際請款扣款|請款扣款|實際扣款|扣款金額|請款金額|授權金額|入帳金額|刷退金額|金額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i,
+    /(?:消費金額|刷卡金額|交易金額|實際請款扣款|請款扣款|實際扣款|扣款金額|請款金額|授權金額|存入金額|存款金額|轉入金額|入帳金額|刷退金額|金額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i,
     /(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年:])/i,
     /(?<![0-9.])([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?\s*元/,
-    /(?:消費|扣款|入帳|刷退|刷卡|授權)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i
+    /(?:消費|扣款|存入|存款|入帳|刷退|刷卡|授權)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i
   ];
   for (const pat of amountPatterns) {
     const m = textForAmount.match(pat);
@@ -1453,6 +1665,17 @@ function parseEsunNotification(rawText, options = {}) {
   if (rawMerchant === '未知商店' && channelType === 'SALARY_IN') {
     rawMerchant = '玉山薪資轉帳';
   }
+  if (channelType === 'DEPOSIT_IN') {
+    if (/無卡存款/.test(cleanText)) {
+      rawMerchant = '玉山 ATM 無卡存款';
+    } else if (/ATM|自動化設備|現金存|跨行存款/i.test(cleanText)) {
+      rawMerchant = '玉山 ATM 存款';
+    } else if (/轉帳|匯款/.test(cleanText)) {
+      rawMerchant = '玉山帳戶轉帳入帳';
+    } else if (rawMerchant === '未知商店' || /存款通知|入帳通知|存入通知|臺幣帳戶|台幣帳戶/.test(rawMerchant)) {
+      rawMerchant = '玉山 ATM 存款';
+    }
+  }
 
   // 5.5 針對新版 iOS AI 捷徑或極簡 Apple Pay 交易文字（如「星巴克 NT$155」或「NT$155 麥當勞」）的智慧店名擷取兜底
   if (rawMerchant === '未知商店' && channelType === 'CHANNEL_A_AUTH') {
@@ -1473,7 +1696,7 @@ function parseEsunNotification(rawText, options = {}) {
   }
 
   const normalizedMerchant = normalizeMerchant(rawMerchant);
-  const classification = classifyTransaction(rawMerchant, normalizedMerchant, amount, cleanText);
+  const classification = classifyTransaction(rawMerchant, normalizedMerchant, amount, cleanText, channelType);
 
   return {
     channelType,
@@ -1534,7 +1757,7 @@ function creditWalletTankFromTx(db, tankType, amount, note, txId, nowIso) {
 function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
   const nowMs = new Date(nowIso).getTime();
   const recentLogs = db.prepare(`
-    SELECT id, received_at, linked_tx_id
+    SELECT id, received_at, linked_tx_id, raw_text
     FROM notification_logs
     WHERE channel_type = 'CHANNEL_A_AUTH' AND dedupe_hash = ?
     ORDER BY id DESC LIMIT 5
@@ -1547,6 +1770,14 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
         isDuplicate: true,
         diffSeconds: Math.round(diffMs / 1000),
         originalTxId: log.linked_tx_id
+      };
+    }
+    if (parsed && parsed.txTimeMinute && log.raw_text && log.raw_text.includes(parsed.txTimeMinute)) {
+      return {
+        isDuplicate: true,
+        diffSeconds: Math.round(diffMs / 1000),
+        originalTxId: log.linked_tx_id,
+        reason: 'SAME_TX_TIME_MINUTE'
       };
     }
   }
@@ -1696,20 +1927,105 @@ function processBankNotification(db, rawText, options = {}) {
   const cycle = ensureCurrentCycle(db, parsed.txDate || refDate);
   const dedupeHash = `${parsed.normalizedMerchant}|${parsed.amount}`;
 
-  // 情境 1：玉山薪資入帳通知 -> 自動以真實入帳金額覆蓋當月預估值
+  // 情境 1：玉山薪資入帳通知 -> 自動以真實入帳金額覆蓋當月預估值，並同步寫入存款紀錄
   if (parsed.channelType === 'SALARY_IN') {
     const updatedCycle = applyActualSalaryDeposit(db, parsed.amount, refDate);
     const actionMsg = `💰 薪資入帳自動校正：以真實薪資 $${parsed.amount} 覆蓋原預估實領 ($${cycle.estimated_net_pay})`;
+    const salTxRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'DEPOSIT', ?, ?, '薪資入帳', ?, ?, 0, ?, 0, ?, ?, ?, NULL, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
+      parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, actionMsg, rawText, nowIso
+    );
+    const salTxId = Number(salTxRes.lastInsertRowid);
     db.prepare(`
       INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-      VALUES (?, 'SALARY_IN', ?, ?, ?, ?, NULL, ?, ?)
-    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, actionMsg, rawText, nowIso);
+      VALUES (?, 'SALARY_IN', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, actionMsg, salTxId, rawText, nowIso);
 
     return {
       resultType: 'SALARY_CALIBRATED',
       channelType: 'SALARY_IN',
       message: actionMsg,
       cycle: updatedCycle,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(salTxId),
+      parsed
+    };
+  }
+
+  // 情境 1.5：金融卡 ATM 存款 / 跨行存款 / 無卡存款 / 帳戶入帳通知 -> 自動新增 DEPOSIT 存款紀錄並計入本月可用資金池
+  if (parsed.channelType === 'DEPOSIT_IN') {
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
+    if (debounce.isDuplicate) {
+      const ignoreMsg = `🛡️ 防重複入帳鎖觸發：與既有「${parsed.normalizedMerchant} +$${parsed.amount}」為同一筆存款通知，已自動忽略不重複累加！${uidSuffix}`;
+      db.prepare(`
+        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
+      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+
+      return {
+        resultType: 'DEBOUNCE_IGNORED',
+        channelType: 'DEPOSIT_IN',
+        message: ignoreMsg,
+        originalTxId: debounce.originalTxId,
+        parsed
+      };
+    }
+
+    let depositNote = `🏧 金融卡存款自動入帳 +$${parsed.amount.toLocaleString()}（已直接計入本月可用預算池）${uidSuffix}`;
+    if (options.deductFromWalletCash) {
+      const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+      if (tank) {
+        const curCash = Number(tank.cash_balance) || 0;
+        const newCash = Math.max(0, curCash - Number(parsed.amount));
+        const actualDeducted = curCash - newCash;
+        db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+        db.prepare(`
+          INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+          VALUES ('CASH', ?, ?, ?, NULL, ?)
+        `).run(-actualDeducted, newCash, `🏧 拿皮包現金去 ATM 存入金融卡 -$${parsed.amount}`, nowIso);
+        depositNote = `🏧 領現轉存金融卡 +$${parsed.amount.toLocaleString()}（已同步從皮包現金扣除並轉入金融卡可用預算）${uidSuffix}`;
+      }
+    }
+
+    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+        .run(parsed.reportedAvailableBalance, nowIso);
+    }
+
+    const depRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'DEPOSIT', ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant, parsed.category || 'ATM存款',
+      parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, parsed.authCode, depositNote, rawText, nowIso
+    );
+
+    const depTxId = Number(depRes.lastInsertRowid);
+    // 亦用 CHANNEL_A_AUTH 相容標籤寫入或保留 DEPOSIT_IN 供 3 分鐘防抖動比對
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'CHANNEL_A_AUTH', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, depositNote, depTxId, rawText, nowIso);
+
+    return {
+      resultType: 'DEPOSIT_RECORDED',
+      channelType: 'DEPOSIT_IN',
+      message: depositNote,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(depTxId),
       parsed
     };
   }
@@ -2214,7 +2530,7 @@ function getVampireAndSubscriptionRadar(db, referenceDateStr) {
 
   const smallTxs = db.prepare(`
     SELECT * FROM transactions
-    WHERE status IN ('PENDING', 'SETTLED')
+    WHERE status IN ('PENDING', 'SETTLED', 'CASH_SPENT')
       AND effective_amount > 0 AND effective_amount < 200
       AND tx_date >= ? AND tx_date <= ?
     ORDER BY tx_date DESC, id DESC
@@ -2407,11 +2723,31 @@ function getWalletTankStatus(db, referenceNowIso) {
   };
 }
 
+function normalizeSignedInputStr(val) {
+  return String(val ?? '')
+    .trim()
+    .replace(/[＋]/g, '+')
+    .replace(/[－﹣—–]/g, '-')
+    .replace(/[$,，\s元]/g, '');
+}
+
+function parseSignedInt(val) {
+  const s = normalizeSignedInputStr(val);
+  if (!s) return NaN;
+  const isNeg = s.startsWith('-');
+  const numPart = s.replace(/^[+-]+/, '');
+  if (!numPart) return NaN;
+  const n = Math.round(Number(numPart));
+  if (!Number.isFinite(n)) return NaN;
+  return isNeg ? -Math.abs(n) : Math.abs(n);
+}
+
 function quickAdjustWalletTank(db, { tankType = 'CASH', deltaAmount = -50, note = '快速扣水庫銅板消費' }) {
   const type = String(tankType).toUpperCase() === 'EASYCARD' ? 'EASYCARD' : 'CASH';
   const col = type === 'EASYCARD' ? 'easycard_balance' : 'cash_balance';
   const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
-  const delta = Math.round(Number(deltaAmount) || 0);
+  const parsed = parseSignedInt(deltaAmount);
+  const delta = Number.isFinite(parsed) ? parsed : 0;
   const newBalance = Math.max(0, (Number(tank[col]) || 0) + delta);
   const nowIso = new Date().toISOString();
 
@@ -2433,8 +2769,8 @@ function auditWalletTank(db, { easycardBalance, cashBalance, easycardMode, cashM
   let newEasy = curEasy;
   let noteEasy = '3天定期盤點手動校正';
   if (easycardBalance !== undefined && easycardBalance !== null && String(easycardBalance).trim() !== '') {
-    const strEasy = String(easycardBalance).trim();
-    const numEasy = Math.round(Number(strEasy));
+    const strEasy = normalizeSignedInputStr(easycardBalance);
+    const numEasy = parseSignedInt(strEasy);
     if (Number.isFinite(numEasy)) {
       if (numEasy < 0 || easycardMode === 'DELTA' || strEasy.startsWith('+')) {
         newEasy = Math.max(0, curEasy + numEasy);
@@ -2448,8 +2784,8 @@ function auditWalletTank(db, { easycardBalance, cashBalance, easycardMode, cashM
   let newCash = curCash;
   let noteCash = '3天定期盤點手動校正';
   if (cashBalance !== undefined && cashBalance !== null && String(cashBalance).trim() !== '') {
-    const strCash = String(cashBalance).trim();
-    const numCash = Math.round(Number(strCash));
+    const strCash = normalizeSignedInputStr(cashBalance);
+    const numCash = parseSignedInt(strCash);
     if (Number.isFinite(numCash)) {
       if (numCash < 0 || cashMode === 'DELTA' || strCash.startsWith('+')) {
         newCash = Math.max(0, curCash + numCash);
@@ -2585,10 +2921,137 @@ function splitUnknownGapTransaction(db, gapTxId, items = []) {
   return { remainingGap, createdTransactions: createdTxs };
 }
 
+/**
+ * 4.4 首頁「使用現金直接登記」：同時扣減皮包現金水庫，並寫入交易明細（可選是否同步扣本月防剁手預算）
+ */
+function recordCashTransaction(db, { itemName, amount, category = '餐飲外食', countInBudget = true, txDate = null, referenceDateStr = null } = {}) {
+  const amt = Math.round(Number(amount) || 0);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    throw new Error('請輸入大於 0 的現金消費金額');
+  }
+  const merchant = String(itemName || '現金消費').trim() || '現金消費';
+  const cat = String(category || '餐飲外食').trim() || '餐飲外食';
+  const nowIso = new Date().toISOString();
+  const refDate = (referenceDateStr || txDate || nowIso.slice(0, 10)).slice(0, 10);
+  const dateStr = (txDate || refDate).slice(0, 10);
+  const cycle = ensureCurrentCycle(db, dateStr);
+
+  // 1. 扣減皮包現金水庫
+  const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+  const curCash = Number(tank?.cash_balance) || 0;
+  const newCash = Math.max(0, curCash - amt);
+  db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+
+  const personalAmt = countInBudget !== false ? amt : 0;
+  const note = countInBudget !== false
+    ? `💵 現金直接消費 -$${amt}（已扣減皮包現金，並計入本月總花費扣減防剁手預算）`
+    : `💵 現金直接消費 -$${amt}（已從皮包現金水庫扣除，不重複扣減金融卡額度）`;
+
+  // 2. 寫入 transactions 供「扣款紀錄」統一檢視
+  const res = db.prepare(`
+    INSERT INTO transactions (
+      cycle_key, status, raw_merchant, normalized_merchant, category,
+      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+      channel_a_raw, channel_b_raw, created_at
+    ) VALUES (?, 'CASH_SPENT', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, 1, 100, ?, 0, 0, 'CASH_DIRECT', NULL, ?)
+  `).run(
+    cycle.cycle_key, merchant, merchant, cat,
+    amt, amt, amt, personalAmt,
+    dateStr, nowIso, nowIso, note, nowIso
+  );
+
+  const txId = Number(res.lastInsertRowid);
+  db.prepare(`
+    INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+    VALUES ('CASH', ?, ?, ?, ?, ?)
+  `).run(-amt, newCash, `💵 現金消費：${merchant}`, txId, nowIso);
+
+  return {
+    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+    walletTank: getWalletTankStatus(db, nowIso)
+  };
+}
+
+/**
+ * 4.5 手動或從皮包現金轉存「金融卡 ATM 存款紀錄」
+ */
+function recordManualAtmDeposit(db, { amount, merchant = '玉山 ATM 存款', category = 'ATM存款', deductFromWalletCash = false, txDate = null, referenceDateStr = null } = {}) {
+  const amt = Math.round(Number(amount) || 0);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    throw new Error('請輸入大於 0 的存款金額');
+  }
+  const cleanMerchant = String(merchant || '玉山 ATM 存款').trim() || '玉山 ATM 存款';
+  const cat = String(category || 'ATM存款').trim() || 'ATM存款';
+  const nowIso = new Date().toISOString();
+  const refDate = (referenceDateStr || txDate || nowIso.slice(0, 10)).slice(0, 10);
+  const dateStr = (txDate || refDate).slice(0, 10);
+  const cycle = ensureCurrentCycle(db, dateStr);
+
+  let note = `🏧 金融卡存款入帳 +$${amt.toLocaleString()}（已直接計入本月金融卡可用預算）`;
+  if (deductFromWalletCash) {
+    const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+    const curCash = Number(tank?.cash_balance) || 0;
+    const newCash = Math.max(0, curCash - amt);
+    db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+    db.prepare(`
+      INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+      VALUES ('CASH', ?, ?, ?, NULL, ?)
+    `).run(-amt, newCash, `🏧 拿皮包現金去 ATM 存入金融卡 -$${amt}`, nowIso);
+    note = `🏧 領現去 ATM 存入金融卡 +$${amt.toLocaleString()}（已同步扣減皮包現金並加入金融卡可用預算）`;
+  }
+
+  const res = db.prepare(`
+    INSERT INTO transactions (
+      cycle_key, status, raw_merchant, normalized_merchant, category,
+      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+      channel_a_raw, channel_b_raw, created_at
+    ) VALUES (?, 'DEPOSIT', ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, NULL, 1, 100, ?, 0, 0, 'MANUAL_DEPOSIT', NULL, ?)
+  `).run(
+    cycle.cycle_key, cleanMerchant, cleanMerchant, cat,
+    amt, amt, amt,
+    dateStr, nowIso, nowIso, note, nowIso
+  );
+
+  const txId = Number(res.lastInsertRowid);
+  return {
+    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+    walletTank: getWalletTankStatus(db, nowIso)
+  };
+}
+
+/**
+ * 4.6 刪除單筆交易或存款紀錄（若為現金消費則自動加回皮包現金）
+ */
+function deleteTransactionRecord(db, txId) {
+  const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(Number(txId));
+  if (!tx) throw new Error('找不到該筆紀錄');
+  const nowIso = new Date().toISOString();
+
+  if (tx.status === 'CASH_SPENT') {
+    const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+    const curCash = Number(tank?.cash_balance) || 0;
+    const refundAmt = Number(tx.effective_amount) || 0;
+    const newCash = curCash + refundAmt;
+    db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+    db.prepare(`
+      INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+      VALUES ('CASH', ?, ?, ?, NULL, ?)
+    `).run(refundAmt, newCash, `↩️ 刪除現金消費退回：${tx.normalized_merchant}`, nowIso);
+  }
+
+  db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
+  return { deletedId: tx.id };
+}
+
 module.exports = {
   splitTransactionBill, settleSplitBill, getSplitBillsSummary,
   getWalletTankStatus, quickAdjustWalletTank, auditWalletTank,
-  syncEsunAvailableBalance, splitUnknownGapTransaction
+  syncEsunAvailableBalance, splitUnknownGapTransaction,
+  recordCashTransaction, recordManualAtmDeposit, deleteTransactionRecord
 };
 
 
@@ -2714,7 +3177,7 @@ function decodeEmailMimeToText(rawMime) {
 
 function isBankTransactionEmailText(text) {
   const t = String(text || '');
-  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳/i.test(t);
+  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳|存款通知|存入通知|帳戶入帳|ATM|無卡存款|跨行存款|轉帳入帳/i.test(t);
   const hasAmount = /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(t);
   return hasBankOrCard && hasAmount;
 }
@@ -2722,7 +3185,7 @@ function isBankTransactionEmailText(text) {
 function buildGoogleAppsScriptCode(webhookUrl) {
   const targetUrl = webhookUrl || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook';
   return `// ============================================================================
-// 🛡️ 防破產記帳系統 — Gmail 刷卡通知 24 小時雲端全自動偵測腳本 (Google Apps Script)
+// 🛡️ 防破產記帳系統 — Gmail 刷卡與 ATM 存款通知 24 小時雲端全自動偵測腳本 (Google Apps Script)
 // 設定步驟（只需設定一次，終身全自動，不需開電腦、不需手動貼上）：
 // 1. 前往 https://script.google.com 新增專案，貼上此程式碼並按 Ctrl+S 儲存
 // 2. 點選左側「觸發條件 (鬧鐘圖示)」➔「+ 新增觸發條件」
@@ -2736,7 +3199,7 @@ function autoSyncCreditCardNotifications() {
   const props = PropertiesService.getScriptProperties();
   const syncedIds = JSON.parse(props.getProperty("SYNCED_MSG_IDS") || "[]");
   const syncedSet = new Set(syncedIds);
-  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 薪資入帳)';
+  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 存款通知 OR 帳戶入帳 OR ATM存款 OR 薪資入帳)';
   const threads = GmailApp.search(query, 0, 15);
   let newSynced = false;
 
@@ -2990,7 +3453,7 @@ const { getDb } = require('../db/database');
 const { getSurvivalDashboardMetrics, syncCycleWithShiftData } = require('../services/survivalEngine');
 const { processBankNotification, resolveGasTempHoldManually, markTransactionCanceled, scanGhostHolds } = require('../services/reconciliationEngine');
 const { getHighRiskModeStatus, evaluateImpulsePurchase, getCooldownCartSummary, fastForwardCooldownItem, resolveCooldownItem, getVampireAndSubscriptionRadar } = require('../services/impulseControlService');
-const { splitTransactionBill, settleSplitBill, getSplitBillsSummary, getWalletTankStatus, quickAdjustWalletTank, auditWalletTank, syncEsunAvailableBalance, splitUnknownGapTransaction } = require('../services/accountingPatchService');
+const { splitTransactionBill, settleSplitBill, getSplitBillsSummary, getWalletTankStatus, quickAdjustWalletTank, auditWalletTank, syncEsunAvailableBalance, splitUnknownGapTransaction, recordCashTransaction, recordManualAtmDeposit, deleteTransactionRecord } = require('../services/accountingPatchService');
 const { pollEsunEmailsViaImap, decodeEmailMimeToText, buildGoogleAppsScriptCode } = require('../services/gmailImapService');
 
 /**
@@ -3008,6 +3471,11 @@ function ensureDemoTransactionsIfEmpty(db) {
   const d3 = fmt(new Date(today.getTime() - 3 * 86400000));
   const d4 = fmt(new Date(today.getTime() - 4 * 86400000));
   const d15 = fmt(new Date(today.getTime() - 15 * 86400000)); // 超過 14 天的幽靈圈存示範
+
+  // 0. 領現金後去 ATM 存入金融卡示範 (DEPOSIT 存款紀錄)
+  processBankNotification(db, `【玉山銀行】存款通知：您的玉山帳戶於 ${d4} 12:10 於 ATM 現金存入 NT$15,000 元，可用餘額 NT$15,000 元。`, {
+    timestamp: `${d4}T12:10:00+08:00`, referenceDate: d0
+  });
 
   // 1. 超過 14 天未請款的幽靈圈存示範
   processBankNotification(db, `【玉山銀行】簽帳金融卡消費授權：${d15} 於「日本亞馬遜 AMAZON JP」刷卡 NT$890 元。`, {
@@ -3289,22 +3757,34 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
   }
 
   if (method === 'POST' && (pathname === '/api/shift/sync' || pathname === '/api/shift/webhook')) {
+    if (body.mappingMode === 'NEXT_MONTH_PAY' || body.mappingMode === 'SAME_MONTH_PAY') {
+      db.prepare('UPDATE user_settings SET llm_api_key = ?, updated_at = ? WHERE id = 1')
+        .run(body.mappingMode, new Date().toISOString());
+    }
+    if (body.clearManualSalary === true) {
+      const curCycle = syncCycleWithShiftData(db, { recalculateOnly: true, referenceDateStr: body.referenceDate || null });
+      db.prepare('UPDATE income_cycles SET actual_salary = NULL, is_salary_settled = 0, last_synced_at = ? WHERE cycle_key = ?')
+        .run(new Date().toISOString(), curCycle.cycle_key);
+    }
     const cycle = syncCycleWithShiftData(db, {
       rawJsonPayload: body.rawJsonPayload || body.shiftState || body.payload || null,
       manualNetSalary: body.manualNetSalary,
       manualGrossPay: body.manualGrossPay,
       manualHourlyWage: body.manualHourlyWage,
+      recalculateOnly: Boolean(body.recalculateOnly),
       isAutoSync: Boolean(body.autoSync),
       referenceDateStr: body.referenceDate || null
     });
-    const effective = cycle.is_salary_settled && cycle.actual_salary !== null ? cycle.actual_salary : cycle.estimated_net_pay;
+    const fullDash = buildFullDashboardSnapshot(db);
+    const effective = fullDash.survival.budget.effectiveIncome;
+    const nextEst = fullDash.survival.timeMapping?.upcomingCycle?.currMonthShift?.estimatedNetPay || 0;
     return {
       status: 200,
       data: {
         ok: true,
-        message: `✅ 已自動同步本月薪資與班表！目前可用薪資預算 $${effective.toLocaleString()}（時薪 $${cycle.hourly_wage}）`,
+        message: `✅ 已同步薪資與時間對照！目前可用預算 $${effective.toLocaleString()}｜下月發薪預估 $${nextEst.toLocaleString()}`,
         cycle,
-        dashboard: buildFullDashboardSnapshot(db)
+        dashboard: fullDash
       }
     };
   }
@@ -3385,6 +3865,22 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
   if (method === 'POST' && pathname === '/api/wallet-tank/audit') {
     const tank = auditWalletTank(db, body);
     return { status: 200, data: { ok: true, walletTank: tank, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  // 9B. 首頁使用現金直接登記消費 & ATM 金融卡存款登記 & 刪除單筆紀錄
+  if (method === 'POST' && pathname === '/api/cash/spend') {
+    const res = recordCashTransaction(db, body);
+    return { status: 200, data: { ok: true, ...res, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  if (method === 'POST' && pathname === '/api/deposits/add') {
+    const res = recordManualAtmDeposit(db, body);
+    return { status: 200, data: { ok: true, ...res, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  if (method === 'POST' && pathname === '/api/transactions/delete') {
+    const res = deleteTransactionRecord(db, body.txId);
+    return { status: 200, data: { ok: true, ...res, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
   // 10. 玉山可用餘額一鍵校正 & 未知漏帳黑洞拆分

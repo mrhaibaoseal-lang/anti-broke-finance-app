@@ -100,11 +100,31 @@ function getWalletTankStatus(db, referenceNowIso) {
   };
 }
 
+function normalizeSignedInputStr(val) {
+  return String(val ?? '')
+    .trim()
+    .replace(/[＋]/g, '+')
+    .replace(/[－﹣—–]/g, '-')
+    .replace(/[$,，\s元]/g, '');
+}
+
+function parseSignedInt(val) {
+  const s = normalizeSignedInputStr(val);
+  if (!s) return NaN;
+  const isNeg = s.startsWith('-');
+  const numPart = s.replace(/^[+-]+/, '');
+  if (!numPart) return NaN;
+  const n = Math.round(Number(numPart));
+  if (!Number.isFinite(n)) return NaN;
+  return isNeg ? -Math.abs(n) : Math.abs(n);
+}
+
 function quickAdjustWalletTank(db, { tankType = 'CASH', deltaAmount = -50, note = '快速扣水庫銅板消費' }) {
   const type = String(tankType).toUpperCase() === 'EASYCARD' ? 'EASYCARD' : 'CASH';
   const col = type === 'EASYCARD' ? 'easycard_balance' : 'cash_balance';
   const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
-  const delta = Math.round(Number(deltaAmount) || 0);
+  const parsed = parseSignedInt(deltaAmount);
+  const delta = Number.isFinite(parsed) ? parsed : 0;
   const newBalance = Math.max(0, (Number(tank[col]) || 0) + delta);
   const nowIso = new Date().toISOString();
 
@@ -126,8 +146,8 @@ function auditWalletTank(db, { easycardBalance, cashBalance, easycardMode, cashM
   let newEasy = curEasy;
   let noteEasy = '3天定期盤點手動校正';
   if (easycardBalance !== undefined && easycardBalance !== null && String(easycardBalance).trim() !== '') {
-    const strEasy = String(easycardBalance).trim();
-    const numEasy = Math.round(Number(strEasy));
+    const strEasy = normalizeSignedInputStr(easycardBalance);
+    const numEasy = parseSignedInt(strEasy);
     if (Number.isFinite(numEasy)) {
       if (numEasy < 0 || easycardMode === 'DELTA' || strEasy.startsWith('+')) {
         newEasy = Math.max(0, curEasy + numEasy);
@@ -141,8 +161,8 @@ function auditWalletTank(db, { easycardBalance, cashBalance, easycardMode, cashM
   let newCash = curCash;
   let noteCash = '3天定期盤點手動校正';
   if (cashBalance !== undefined && cashBalance !== null && String(cashBalance).trim() !== '') {
-    const strCash = String(cashBalance).trim();
-    const numCash = Math.round(Number(strCash));
+    const strCash = normalizeSignedInputStr(cashBalance);
+    const numCash = parseSignedInt(strCash);
     if (Number.isFinite(numCash)) {
       if (numCash < 0 || cashMode === 'DELTA' || strCash.startsWith('+')) {
         newCash = Math.max(0, curCash + numCash);
@@ -278,10 +298,137 @@ function splitUnknownGapTransaction(db, gapTxId, items = []) {
   return { remainingGap, createdTransactions: createdTxs };
 }
 
+/**
+ * 4.4 首頁「使用現金直接登記」：同時扣減皮包現金水庫，並寫入交易明細（可選是否同步扣本月防剁手預算）
+ */
+function recordCashTransaction(db, { itemName, amount, category = '餐飲外食', countInBudget = true, txDate = null, referenceDateStr = null } = {}) {
+  const amt = Math.round(Number(amount) || 0);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    throw new Error('請輸入大於 0 的現金消費金額');
+  }
+  const merchant = String(itemName || '現金消費').trim() || '現金消費';
+  const cat = String(category || '餐飲外食').trim() || '餐飲外食';
+  const nowIso = new Date().toISOString();
+  const refDate = (referenceDateStr || txDate || nowIso.slice(0, 10)).slice(0, 10);
+  const dateStr = (txDate || refDate).slice(0, 10);
+  const cycle = ensureCurrentCycle(db, dateStr);
+
+  // 1. 扣減皮包現金水庫
+  const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+  const curCash = Number(tank?.cash_balance) || 0;
+  const newCash = Math.max(0, curCash - amt);
+  db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+
+  const personalAmt = countInBudget !== false ? amt : 0;
+  const note = countInBudget !== false
+    ? `💵 現金直接消費 -$${amt}（已扣減皮包現金，並計入本月總花費扣減防剁手預算）`
+    : `💵 現金直接消費 -$${amt}（已從皮包現金水庫扣除，不重複扣減金融卡額度）`;
+
+  // 2. 寫入 transactions 供「扣款紀錄」統一檢視
+  const res = db.prepare(`
+    INSERT INTO transactions (
+      cycle_key, status, raw_merchant, normalized_merchant, category,
+      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+      channel_a_raw, channel_b_raw, created_at
+    ) VALUES (?, 'CASH_SPENT', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, 1, 100, ?, 0, 0, 'CASH_DIRECT', NULL, ?)
+  `).run(
+    cycle.cycle_key, merchant, merchant, cat,
+    amt, amt, amt, personalAmt,
+    dateStr, nowIso, nowIso, note, nowIso
+  );
+
+  const txId = Number(res.lastInsertRowid);
+  db.prepare(`
+    INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+    VALUES ('CASH', ?, ?, ?, ?, ?)
+  `).run(-amt, newCash, `💵 現金消費：${merchant}`, txId, nowIso);
+
+  return {
+    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+    walletTank: getWalletTankStatus(db, nowIso)
+  };
+}
+
+/**
+ * 4.5 手動或從皮包現金轉存「金融卡 ATM 存款紀錄」
+ */
+function recordManualAtmDeposit(db, { amount, merchant = '玉山 ATM 存款', category = 'ATM存款', deductFromWalletCash = false, txDate = null, referenceDateStr = null } = {}) {
+  const amt = Math.round(Number(amount) || 0);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    throw new Error('請輸入大於 0 的存款金額');
+  }
+  const cleanMerchant = String(merchant || '玉山 ATM 存款').trim() || '玉山 ATM 存款';
+  const cat = String(category || 'ATM存款').trim() || 'ATM存款';
+  const nowIso = new Date().toISOString();
+  const refDate = (referenceDateStr || txDate || nowIso.slice(0, 10)).slice(0, 10);
+  const dateStr = (txDate || refDate).slice(0, 10);
+  const cycle = ensureCurrentCycle(db, dateStr);
+
+  let note = `🏧 金融卡存款入帳 +$${amt.toLocaleString()}（已直接計入本月金融卡可用預算）`;
+  if (deductFromWalletCash) {
+    const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+    const curCash = Number(tank?.cash_balance) || 0;
+    const newCash = Math.max(0, curCash - amt);
+    db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+    db.prepare(`
+      INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+      VALUES ('CASH', ?, ?, ?, NULL, ?)
+    `).run(-amt, newCash, `🏧 拿皮包現金去 ATM 存入金融卡 -$${amt}`, nowIso);
+    note = `🏧 領現去 ATM 存入金融卡 +$${amt.toLocaleString()}（已同步扣減皮包現金並加入金融卡可用預算）`;
+  }
+
+  const res = db.prepare(`
+    INSERT INTO transactions (
+      cycle_key, status, raw_merchant, normalized_merchant, category,
+      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+      channel_a_raw, channel_b_raw, created_at
+    ) VALUES (?, 'DEPOSIT', ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, NULL, 1, 100, ?, 0, 0, 'MANUAL_DEPOSIT', NULL, ?)
+  `).run(
+    cycle.cycle_key, cleanMerchant, cleanMerchant, cat,
+    amt, amt, amt,
+    dateStr, nowIso, nowIso, note, nowIso
+  );
+
+  const txId = Number(res.lastInsertRowid);
+  return {
+    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+    walletTank: getWalletTankStatus(db, nowIso)
+  };
+}
+
+/**
+ * 4.6 刪除單筆交易或存款紀錄（若為現金消費則自動加回皮包現金）
+ */
+function deleteTransactionRecord(db, txId) {
+  const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(Number(txId));
+  if (!tx) throw new Error('找不到該筆紀錄');
+  const nowIso = new Date().toISOString();
+
+  if (tx.status === 'CASH_SPENT') {
+    const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
+    const curCash = Number(tank?.cash_balance) || 0;
+    const refundAmt = Number(tx.effective_amount) || 0;
+    const newCash = curCash + refundAmt;
+    db.prepare('UPDATE wallet_tank SET cash_balance = ?, updated_at = ? WHERE id = 1').run(newCash, nowIso);
+    db.prepare(`
+      INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
+      VALUES ('CASH', ?, ?, ?, NULL, ?)
+    `).run(refundAmt, newCash, `↩️ 刪除現金消費退回：${tx.normalized_merchant}`, nowIso);
+  }
+
+  db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
+  return { deletedId: tx.id };
+}
+
 module.exports = {
   splitTransactionBill, settleSplitBill, getSplitBillsSummary,
   getWalletTankStatus, quickAdjustWalletTank, auditWalletTank,
-  syncEsunAvailableBalance, splitUnknownGapTransaction
+  syncEsunAvailableBalance, splitUnknownGapTransaction,
+  recordCashTransaction, recordManualAtmDeposit, deleteTransactionRecord
 };
 
 

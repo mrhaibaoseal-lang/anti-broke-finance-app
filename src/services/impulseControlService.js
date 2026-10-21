@@ -237,7 +237,7 @@ function getVampireAndSubscriptionRadar(db, referenceDateStr) {
 
   const smallTxs = db.prepare(`
     SELECT * FROM transactions
-    WHERE status IN ('PENDING', 'SETTLED')
+    WHERE status IN ('PENDING', 'SETTLED', 'CASH_SPENT')
       AND effective_amount > 0 AND effective_amount < 200
       AND tx_date >= ? AND tx_date <= ?
     ORDER BY tx_date DESC, id DESC

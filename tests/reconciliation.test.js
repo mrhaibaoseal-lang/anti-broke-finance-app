@@ -548,6 +548,151 @@ test('12. 修復三大已知問題：現金/悠遊卡自訂負數扣款不歸零
   assert.equal(sameMonthRes.data.dashboard.survival.budget.effectiveIncome, 2204);
 });
 
+test('13. 領現金再去 ATM 存金融卡全流程：玉山 ATM 存款通知偵測、存款/扣款紀錄分離、首頁現金直接登記與班表零衝突', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const db = setupTestDb();
+
+  // (1) 使用者領到現金薪水後，先在皮包留 $5,000 現鈔，並把 $6,000 拿去 ATM 存入玉山金融卡
+  await handleApiRequest('POST', '/api/wallet-tank/audit', {
+    cashBalance: '5000',
+    easycardBalance: '300'
+  }, new URLSearchParams(), { db });
+
+  const atmDep1 = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_shortcut_auto',
+    text: '【玉山銀行】存款通知：您的玉山帳戶(末四碼1234)於 2026/10/21 15:20 於 ATM 現金存入 NT$6,000 元，帳戶可用餘額 NT$6,000 元。',
+    timestamp: '2026-10-21T07:20:00.000Z',
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(atmDep1.data.ok, true);
+  assert.equal(atmDep1.data.result.resultType, 'DEPOSIT_RECORDED');
+  assert.equal(atmDep1.data.result.channelType, 'DEPOSIT_IN');
+  assert.equal(atmDep1.data.result.transaction.status, 'DEPOSIT');
+  assert.equal(atmDep1.data.result.transaction.effective_amount, 6000);
+  assert.equal(atmDep1.data.result.transaction.personal_amount, 0);
+  assert.equal(atmDep1.data.dashboard.survival.budget.atmDeposited, 6000);
+  assert.equal(atmDep1.data.dashboard.survival.budget.effectiveIncome, 6000);
+  assert.equal(atmDep1.data.dashboard.survival.budget.totalSpent, 0);
+
+  // (2) 跨管道防重測試：5 分鐘後 Gmail 信箱又抓到同一筆 15:20 的 $6,000 ATM 存款通知信 -> 自動攔截不重複累加！
+  const dupAtmEmail = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'gmail_imap_auto',
+    text: '【玉山銀行臺幣存匯通知】您的帳戶於 2026/10/21 15:20 自動化設備存款 新臺幣 6,000.00 元。',
+    timestamp: '2026-10-21T07:25:00.000Z',
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+  assert.equal(dupAtmEmail.data.result.resultType, 'DEBOUNCE_IGNORED');
+  assert.equal(dupAtmEmail.data.dashboard.survival.budget.effectiveIncome, 6000);
+
+  // (3) 隔天再去 ATM 無卡存款 $4,000 -> 自動累加存款紀錄，金融卡總可用預算變為 $10,000 (共 2 筆存款紀錄)
+  const atmDep2 = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_shortcut_auto',
+    text: '【玉山Wallet】臺幣帳戶入帳通知：您的帳戶於 2026/10/22 18:10 完成無卡存款存入 新臺幣 4,000 元。',
+    timestamp: '2026-10-22T10:10:00.000Z',
+    referenceDate: '2026-10-22'
+  }, new URLSearchParams(), { db });
+  assert.equal(atmDep2.data.result.resultType, 'DEPOSIT_RECORDED');
+  assert.equal(atmDep2.data.dashboard.survival.budget.atmDeposited, 10000);
+  assert.equal(atmDep2.data.dashboard.survival.budget.depositCount, 2);
+  assert.equal(atmDep2.data.dashboard.survival.budget.effectiveIncome, 10000);
+
+  // (4) 首頁「使用現金直接登記」：花現金買雞腿便當 $120（僅扣皮包現金）與手搖飲 $65（同步計入防剁手預算）
+  const cashTx1 = await handleApiRequest('POST', '/api/cash/spend', {
+    itemName: '巷口雞腿便當',
+    amount: 120,
+    category: '餐飲外食',
+    countInBudget: false,
+    referenceDateStr: '2026-10-22'
+  }, new URLSearchParams(), { db });
+  assert.equal(cashTx1.data.ok, true);
+  assert.equal(cashTx1.data.transaction.status, 'CASH_SPENT');
+  assert.equal(cashTx1.data.walletTank.cashBalance, 4880); // 5000 - 120
+
+  const cashTx2 = await handleApiRequest('POST', '/api/cash/spend', {
+    itemName: '50嵐四季春',
+    amount: 65,
+    category: '手搖飲品',
+    countInBudget: true,
+    referenceDateStr: '2026-10-22'
+  }, new URLSearchParams(), { db });
+  assert.equal(cashTx2.data.walletTank.cashBalance, 4815); // 4880 - 65
+  assert.equal(cashTx2.data.dashboard.survival.budget.cashSpent, 185); // 120 + 65
+  assert.equal(cashTx2.data.dashboard.survival.budget.totalSpent, 65); // 僅勾選同步扣預算的 $65 計入金融卡防剁手總花費
+
+  // (5) 首頁「從皮包拿現金去 ATM 存入金融卡」：拿 $3,000 皮包現金去 ATM 存卡 (deductFromWalletCash: true)
+  const manualAtmRes = await handleApiRequest('POST', '/api/deposits/add', {
+    amount: 3000,
+    merchant: '玉山 ATM 存款',
+    category: 'ATM存款',
+    deductFromWalletCash: true,
+    referenceDateStr: '2026-10-22'
+  }, new URLSearchParams(), { db });
+  assert.equal(manualAtmRes.data.walletTank.cashBalance, 1815); // 4815 - 3000
+  assert.equal(manualAtmRes.data.dashboard.survival.budget.atmDeposited, 13000); // 10000 + 3000
+  assert.equal(manualAtmRes.data.dashboard.survival.budget.depositCount, 3);
+  assert.equal(manualAtmRes.data.dashboard.survival.budget.effectiveIncome, 13000);
+
+  // (6) 驗證班表薪資 App 零衝突：即使同步了班表排班 ($2,320)，因為已有真實 ATM 存款 ($13,000)，主預算絕不會被班表覆蓋！
+  const shiftSyncRes = await handleApiRequest('POST', '/api/shift/sync', {
+    rawJsonPayload: {
+      app: 'shiftpay-v2',
+      settings: { hourlyWage: 200, otMultiplier: 1.34, roundingMode: 'monthly', attendanceBonus: 0 },
+      shifts: {
+        '2026-10-15': { name: '晚班', start: '18:00', end: '22:00', breakMin: 0, otMin: 0, status: 'normal' }
+      }
+    },
+    autoSync: true,
+    referenceDate: '2026-10-22'
+  }, new URLSearchParams(), { db });
+  assert.equal(shiftSyncRes.data.dashboard.survival.budget.effectiveIncome, 13000);
+  assert.equal(shiftSyncRes.data.dashboard.survival.cycle.shiftGrossPay, 800); // 班表應領現金仍保留供對帳
+});
+
+test('14. 皮包現金與悠遊卡自訂輸入加值與扣款：支援 60、+60、＋60 正數加值與 -60、－60 負數扣款', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const db = setupTestDb();
+
+  // 初始餘額為 $0，輸入正數 60 應加值 +$60 顯示為 $60
+  const addCash60 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
+    tankType: 'CASH',
+    deltaAmount: '60',
+    note: '自訂金額加值'
+  }, new URLSearchParams(), { db });
+  assert.equal(addCash60.data.walletTank.cashBalance, 60);
+
+  // 輸入 +60 應再加值 +$60 顯示為 $120
+  const addCashPlus60 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
+    tankType: 'CASH',
+    deltaAmount: '+60',
+    note: '自訂金額加值'
+  }, new URLSearchParams(), { db });
+  assert.equal(addCashPlus60.data.walletTank.cashBalance, 120);
+
+  // 悠遊卡輸入 +60 與全形 ＋60 應正常加值
+  await handleApiRequest('POST', '/api/wallet-tank/adjust', {
+    tankType: 'EASYCARD',
+    deltaAmount: '60',
+    note: '自訂金額加值'
+  }, new URLSearchParams(), { db });
+  const addEasyPlus60 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
+    tankType: 'EASYCARD',
+    deltaAmount: '＋60',
+    note: '自訂金額加值'
+  }, new URLSearchParams(), { db });
+  assert.equal(addEasyPlus60.data.walletTank.easycardBalance, 120);
+
+  // 輸入 -45 應正常扣款
+  const subEasy45 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
+    tankType: 'EASYCARD',
+    deltaAmount: '-45',
+    note: '自訂金額扣款'
+  }, new URLSearchParams(), { db });
+  assert.equal(subEasy45.data.walletTank.easycardBalance, 75);
+});
+
+
+
 
 
 

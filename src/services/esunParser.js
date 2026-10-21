@@ -100,6 +100,18 @@ function normalizeMerchant(rawMerchant) {
   if (/SHOPEE|蝦皮/.test(s)) {
     return '蝦皮購物';
   }
+  if (/玉山\s*ATM\s*無卡存款|無卡存款/.test(s)) {
+    return '玉山 ATM 無卡存款';
+  }
+  if (/玉山\s*ATM\s*現金存款|玉山\s*ATM\s*存款|ATM\s*現金存款|ATM\s*存款|ATM\s*存入|自動化設備存款|跨行存款/.test(s)) {
+    return '玉山 ATM 存款';
+  }
+  if (/玉山帳戶轉帳入帳|轉帳入帳|轉帳存入|匯款入帳/.test(s)) {
+    return '玉山帳戶轉帳入帳';
+  }
+  if (/玉山金融卡存款/.test(s)) {
+    return '玉山金融卡存款';
+  }
 
   // 移除尾端分店編號干擾（保留主要店名關鍵字）
   s = s.replace(/\s+(股份有限公司|有限公司)$/g, '').trim();
@@ -135,25 +147,37 @@ function computeMerchantSimilarity(merchantA, merchantB) {
 /**
  * 自動推斷消費分類與特殊標記
  */
-function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
+function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText, channelType = null) {
   const combined = `${rawMerchant} ${normalizedMerchant} ${rawText || ''}`.toUpperCase();
 
   const isVerifyAuth = amount === 1 || amount === 2;
   const isGasStation = /中油|加油站|全國加油|台亞|速邁樂|台塑石油/.test(combined);
   const isGasPreAuth = isGasStation && (amount === 1500 || amount === 2250);
 
+  const isDeposit = channelType === 'DEPOSIT_IN' || channelType === 'SALARY_IN' || (
+    /ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯|轉帳入帳|轉帳存入|匯款入帳|收到轉帳/.test(combined) &&
+    !/提款|提領|刷退|取消授權|請款入帳|帳單請款/.test(combined)
+  );
+
   let walletTankType = null;
-  if (/自動加值|悠遊卡|EASYCARD|全支付|IPASS\s*MONEY|一卡通MONEY|街口儲值/.test(combined)) {
-    walletTankType = 'EASYCARD';
-  } else if (/ATM|提款|現金提領|跨行提款|無卡提款/.test(combined)) {
-    walletTankType = 'CASH';
+  if (!isDeposit) {
+    if (/自動加值|悠遊卡|EASYCARD|全支付|IPASS\s*MONEY|一卡通MONEY|街口儲值/.test(combined)) {
+      walletTankType = 'EASYCARD';
+    } else if (/ATM\s*提款|ATM\s*提領|提款|現金提領|跨行提款|無卡提款/.test(combined) || (/ATM/.test(combined) && !/存款|存入|入帳/.test(combined))) {
+      walletTankType = 'CASH';
+    }
   }
 
-  const isApplePay = /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
-  const isForeignTx = /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
+  const isApplePay = !isDeposit && /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
+  const isForeignTx = !isDeposit && /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
 
   let category = '一般消費';
-  if (isVerifyAuth) category = '綁卡驗證';
+  if (channelType === 'SALARY_IN' || /薪資入帳|薪水入帳|薪資轉帳/.test(combined)) category = '薪資入帳';
+  else if (isDeposit) {
+    if (/轉帳|匯款/.test(combined) && !/ATM|無卡存款|現金存/.test(combined)) category = '轉帳入帳';
+    else category = 'ATM存款';
+  }
+  else if (isVerifyAuth) category = '綁卡驗證';
   else if (isGasStation) category = '加油交通';
   else if (walletTankType === 'EASYCARD') category = '自動加值/儲值';
   else if (walletTankType === 'CASH') category = 'ATM提款';
@@ -165,6 +189,7 @@ function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
 
   return {
     category,
+    isDeposit,
     isApplePay,
     isVerifyAuth,
     isGasStation,
@@ -223,12 +248,17 @@ function parseEsunNotification(rawText, options = {}) {
     .replace(/待(?:特約)?商店請款後(?:始進行)?扣款/g, '')
     .replace(/尚未請款|未請款/g, '');
 
-  // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
+  // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > ATM存款/帳戶入帳 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
   let channelType = 'CHANNEL_A_AUTH';
   if (/薪資入帳|薪水入帳|薪資轉帳|薪轉入帳|發薪入帳|薪資發放/.test(textWithoutDisclaimer)) {
     channelType = 'SALARY_IN';
   } else if (/刷退|退貨|取消授權|解圈退回|沖銷入帳|退單|取消交易|退款/.test(textWithoutDisclaimer)) {
     channelType = 'REFUND';
+  } else if (
+    /ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯通知|轉帳入帳|轉帳存入|匯款入帳|收到轉帳|存入金額|存款金額|存入\s*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$|\d)/i.test(textWithoutDisclaimer) &&
+    !/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款|一般消費|刷卡消費|感應刷卡|提款|提領/.test(textWithoutDisclaimer)
+  ) {
+    channelType = 'DEPOSIT_IN';
   } else if (/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_B_SETTLE';
   } else if (/信用卡|簽帳金融卡|簽帳卡|玉山卡|授權|刷卡|圈存|一般消費|消費通知|消費金額|特店名稱|新增消費/.test(textWithoutDisclaimer)) {
@@ -254,13 +284,13 @@ function parseEsunNotification(rawText, options = {}) {
     .replace(/(?:可用餘額|帳戶可用餘額|帳戶餘額|剩餘額度|信用額度)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*[0-9,]+(?:\.[0-9]+)?\s*元?/gi, ' ')
     .replace(/(?:卡號)?(?:末四碼|末4碼)[：:\s(（]*[0-9]{4}[)）]?/g, ' ');
 
-  // 2. 擷取金額 (支援整數與 .00 小數格式，優先匹配消費/扣款/金額標籤與 NT$/TWD/新臺幣，並排除日期年份)
+  // 2. 擷取金額 (支援整數與 .00 小數格式，優先匹配消費/扣款/存款/金額標籤與 NT$/TWD/新臺幣，並排除日期年份)
   let amount = 0;
   const amountPatterns = [
-    /(?:消費金額|刷卡金額|交易金額|實際請款扣款|請款扣款|實際扣款|扣款金額|請款金額|授權金額|入帳金額|刷退金額|金額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i,
+    /(?:消費金額|刷卡金額|交易金額|實際請款扣款|請款扣款|實際扣款|扣款金額|請款金額|授權金額|存入金額|存款金額|轉入金額|入帳金額|刷退金額|金額)[：:\s]*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i,
     /(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年:])/i,
     /(?<![0-9.])([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?\s*元/,
-    /(?:消費|扣款|入帳|刷退|刷卡|授權)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i
+    /(?:消費|扣款|存入|存款|入帳|刷退|刷卡|授權)[：:\s]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?(?![0-9]*[\/\-年月:])/i
   ];
   for (const pat of amountPatterns) {
     const m = textForAmount.match(pat);
@@ -334,6 +364,17 @@ function parseEsunNotification(rawText, options = {}) {
   if (rawMerchant === '未知商店' && channelType === 'SALARY_IN') {
     rawMerchant = '玉山薪資轉帳';
   }
+  if (channelType === 'DEPOSIT_IN') {
+    if (/無卡存款/.test(cleanText)) {
+      rawMerchant = '玉山 ATM 無卡存款';
+    } else if (/ATM|自動化設備|現金存|跨行存款/i.test(cleanText)) {
+      rawMerchant = '玉山 ATM 存款';
+    } else if (/轉帳|匯款/.test(cleanText)) {
+      rawMerchant = '玉山帳戶轉帳入帳';
+    } else if (rawMerchant === '未知商店' || /存款通知|入帳通知|存入通知|臺幣帳戶|台幣帳戶/.test(rawMerchant)) {
+      rawMerchant = '玉山 ATM 存款';
+    }
+  }
 
   // 5.5 針對新版 iOS AI 捷徑或極簡 Apple Pay 交易文字（如「星巴克 NT$155」或「NT$155 麥當勞」）的智慧店名擷取兜底
   if (rawMerchant === '未知商店' && channelType === 'CHANNEL_A_AUTH') {
@@ -354,7 +395,7 @@ function parseEsunNotification(rawText, options = {}) {
   }
 
   const normalizedMerchant = normalizeMerchant(rawMerchant);
-  const classification = classifyTransaction(rawMerchant, normalizedMerchant, amount, cleanText);
+  const classification = classifyTransaction(rawMerchant, normalizedMerchant, amount, cleanText, channelType);
 
   return {
     channelType,

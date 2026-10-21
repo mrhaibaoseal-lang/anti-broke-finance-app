@@ -117,7 +117,7 @@ function decodeEmailMimeToText(rawMime) {
 
 function isBankTransactionEmailText(text) {
   const t = String(text || '');
-  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳/i.test(t);
+  const hasBankOrCard = /玉山|E\.?SUN|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|請款|薪資入帳|薪資轉帳|存款通知|存入通知|帳戶入帳|ATM|無卡存款|跨行存款|轉帳入帳/i.test(t);
   const hasAmount = /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(t);
   return hasBankOrCard && hasAmount;
 }
@@ -125,7 +125,7 @@ function isBankTransactionEmailText(text) {
 function buildGoogleAppsScriptCode(webhookUrl) {
   const targetUrl = webhookUrl || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook';
   return `// ============================================================================
-// 🛡️ 防破產記帳系統 — Gmail 刷卡通知 24 小時雲端全自動偵測腳本 (Google Apps Script)
+// 🛡️ 防破產記帳系統 — Gmail 刷卡與 ATM 存款通知 24 小時雲端全自動偵測腳本 (Google Apps Script)
 // 設定步驟（只需設定一次，終身全自動，不需開電腦、不需手動貼上）：
 // 1. 前往 https://script.google.com 新增專案，貼上此程式碼並按 Ctrl+S 儲存
 // 2. 點選左側「觸發條件 (鬧鐘圖示)」➔「+ 新增觸發條件」
@@ -139,7 +139,7 @@ function autoSyncCreditCardNotifications() {
   const props = PropertiesService.getScriptProperties();
   const syncedIds = JSON.parse(props.getProperty("SYNCED_MSG_IDS") || "[]");
   const syncedSet = new Set(syncedIds);
-  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 薪資入帳)';
+  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 存款通知 OR 帳戶入帳 OR ATM存款 OR 薪資入帳)';
   const threads = GmailApp.search(query, 0, 15);
   let newSynced = false;
 

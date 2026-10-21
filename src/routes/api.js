@@ -4,7 +4,7 @@ const { getDb } = require('../db/database');
 const { getSurvivalDashboardMetrics, syncCycleWithShiftData } = require('../services/survivalEngine');
 const { processBankNotification, resolveGasTempHoldManually, markTransactionCanceled, scanGhostHolds } = require('../services/reconciliationEngine');
 const { getHighRiskModeStatus, evaluateImpulsePurchase, getCooldownCartSummary, fastForwardCooldownItem, resolveCooldownItem, getVampireAndSubscriptionRadar } = require('../services/impulseControlService');
-const { splitTransactionBill, settleSplitBill, getSplitBillsSummary, getWalletTankStatus, quickAdjustWalletTank, auditWalletTank, syncEsunAvailableBalance, splitUnknownGapTransaction } = require('../services/accountingPatchService');
+const { splitTransactionBill, settleSplitBill, getSplitBillsSummary, getWalletTankStatus, quickAdjustWalletTank, auditWalletTank, syncEsunAvailableBalance, splitUnknownGapTransaction, recordCashTransaction, recordManualAtmDeposit, deleteTransactionRecord } = require('../services/accountingPatchService');
 const { pollEsunEmailsViaImap, decodeEmailMimeToText, buildGoogleAppsScriptCode } = require('../services/gmailImapService');
 
 /**
@@ -22,6 +22,11 @@ function ensureDemoTransactionsIfEmpty(db) {
   const d3 = fmt(new Date(today.getTime() - 3 * 86400000));
   const d4 = fmt(new Date(today.getTime() - 4 * 86400000));
   const d15 = fmt(new Date(today.getTime() - 15 * 86400000)); // 超過 14 天的幽靈圈存示範
+
+  // 0. 領現金後去 ATM 存入金融卡示範 (DEPOSIT 存款紀錄)
+  processBankNotification(db, `【玉山銀行】存款通知：您的玉山帳戶於 ${d4} 12:10 於 ATM 現金存入 NT$15,000 元，可用餘額 NT$15,000 元。`, {
+    timestamp: `${d4}T12:10:00+08:00`, referenceDate: d0
+  });
 
   // 1. 超過 14 天未請款的幽靈圈存示範
   processBankNotification(db, `【玉山銀行】簽帳金融卡消費授權：${d15} 於「日本亞馬遜 AMAZON JP」刷卡 NT$890 元。`, {
@@ -411,6 +416,22 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
   if (method === 'POST' && pathname === '/api/wallet-tank/audit') {
     const tank = auditWalletTank(db, body);
     return { status: 200, data: { ok: true, walletTank: tank, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  // 9B. 首頁使用現金直接登記消費 & ATM 金融卡存款登記 & 刪除單筆紀錄
+  if (method === 'POST' && pathname === '/api/cash/spend') {
+    const res = recordCashTransaction(db, body);
+    return { status: 200, data: { ok: true, ...res, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  if (method === 'POST' && pathname === '/api/deposits/add') {
+    const res = recordManualAtmDeposit(db, body);
+    return { status: 200, data: { ok: true, ...res, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  if (method === 'POST' && pathname === '/api/transactions/delete') {
+    const res = deleteTransactionRecord(db, body.txId);
+    return { status: 200, data: { ok: true, ...res, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
   // 10. 玉山可用餘額一鍵校正 & 未知漏帳黑洞拆分

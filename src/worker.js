@@ -41,14 +41,22 @@ export default {
     }
 
     if (env && env.ASSETS) {
+      let assetRes;
       if (url.pathname === '/shift-pay' || url.pathname === '/shift-pay/') {
-        return env.ASSETS.fetch(new Request(new URL('/shift-pay.html', request.url), request));
+        assetRes = await env.ASSETS.fetch(new Request(new URL('/shift-pay.html', request.url), request));
+      } else {
+        assetRes = await env.ASSETS.fetch(request);
+        if (assetRes.status === 404 && request.method === 'GET') {
+          assetRes = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url), request));
+        }
       }
-      const assetRes = await env.ASSETS.fetch(request);
-      if (assetRes.status === 404 && request.method === 'GET') {
-        return env.ASSETS.fetch(new Request(new URL('/index.html', request.url), request));
-      }
-      return assetRes;
+      const headers = new Headers(assetRes.headers);
+      headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+      return new Response(assetRes.body, {
+        status: assetRes.status,
+        statusText: assetRes.statusText,
+        headers
+      });
     }
 
     return new Response('Not Found', { status: 404 });

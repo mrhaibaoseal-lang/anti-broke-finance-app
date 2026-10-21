@@ -271,14 +271,46 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
   const prevMonthEstNet = calculateEstimatedNetPay(prevMonthShift.totalPay, settings.net_pay_factor, settings.labor_health_deduction);
   const currMonthEstNet = calculateEstimatedNetPay(currMonthShift.totalPay, settings.net_pay_factor, settings.labor_health_deduction);
 
+  const fixedRow = db.prepare('SELECT COALESCE(SUM(monthly_amount), 0) AS total_fixed FROM fixed_expenses WHERE is_active = 1').get();
+  const fixedAndInstallments = Number(fixedRow.total_fixed) || 0;
+
+  const spentRow = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP', 'CASH_SPENT') THEN personal_amount ELSE 0 END), 0) AS total_spent,
+      COALESCE(SUM(CASE WHEN status = 'PENDING' THEN personal_amount ELSE 0 END), 0) AS pending_spent,
+      COALESCE(SUM(CASE WHEN status IN ('SETTLED', 'CASH_SPENT') THEN personal_amount ELSE 0 END), 0) AS settled_spent,
+      COALESCE(SUM(CASE WHEN status = 'CASH_SPENT' THEN effective_amount ELSE 0 END), 0) AS cash_spent,
+      COALESCE(SUM(CASE WHEN status = 'UNKNOWN_GAP' THEN personal_amount ELSE 0 END), 0) AS gap_spent,
+      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP', 'CASH_SPENT') AND tx_date = ? THEN personal_amount ELSE 0 END), 0) AS today_spent,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' THEN effective_amount ELSE 0 END), 0) AS total_deposited,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' AND category != '薪資入帳' THEN effective_amount ELSE 0 END), 0) AS atm_deposited,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' THEN 1 ELSE 0 END), 0) AS deposit_count,
+      COALESCE(SUM(CASE WHEN status = 'DEPOSIT' AND tx_date = ? THEN effective_amount ELSE 0 END), 0) AS today_deposited
+    FROM transactions WHERE cycle_key = ?
+  `).get(refDate, refDate, cycle.cycle_key);
+
+  const totalSpent = Number(spentRow.total_spent) || 0;
+  const todaySpent = Number(spentRow.today_spent) || 0;
+  const totalDeposited = Number(spentRow.total_deposited) || 0;
+  const atmDeposited = Number(spentRow.atm_deposited) || 0;
+  const depositCount = Number(spentRow.deposit_count) || 0;
+  const todayDeposited = Number(spentRow.today_deposited) || 0;
+  const cashSpent = Number(spentRow.cash_spent) || 0;
+
   let effectiveIncome;
   let activeSourceType;
   let activeSourceLabel;
 
   if (cycle.is_salary_settled && cycle.actual_salary !== null) {
-    effectiveIncome = Number(cycle.actual_salary);
-    activeSourceType = 'MANUAL_SETTLED';
-    activeSourceLabel = `手動設定目前已領薪資 ($${effectiveIncome.toLocaleString()})`;
+    effectiveIncome = Number(cycle.actual_salary) + atmDeposited;
+    activeSourceType = atmDeposited > 0 ? 'ATM_AND_BASE' : 'MANUAL_SETTLED';
+    activeSourceLabel = atmDeposited > 0
+      ? `🏧 金融卡存款 ($${atmDeposited.toLocaleString()}) ＋ 初始預算 ($${Number(cycle.actual_salary).toLocaleString()})`
+      : `手動設定目前已領薪資 ($${effectiveIncome.toLocaleString()})`;
+  } else if (atmDeposited > 0) {
+    effectiveIncome = atmDeposited;
+    activeSourceType = 'ATM_DEPOSIT';
+    activeSourceLabel = `🏧 金融卡存款累計 ($${atmDeposited.toLocaleString()} · 共 ${depositCount} 筆)`;
   } else if (fullState) {
     if (mappingMode === 'NEXT_MONTH_PAY') {
       effectiveIncome = prevMonthEstNet;
@@ -287,7 +319,7 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
         activeSourceLabel = `${earnedShiftMonth} 上月班表（${cycle.start_date.slice(5).replace('-', '/')} 已發薪）`;
       } else {
         activeSourceType = 'AWAITING_CURRENT_BUDGET';
-        activeSourceLabel = `待設定目前可用薪水（${accumulatingShiftMonth} 班表為下月發薪）`;
+        activeSourceLabel = `待存入金融卡或設定目前預算（${accumulatingShiftMonth} 班表為領現參考）`;
       }
     } else {
       effectiveIncome = currMonthShift.totalPay > 0 ? currMonthEstNet : Number(cycle.estimated_net_pay);
@@ -299,22 +331,6 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
     activeSourceType = 'ESTIMATED_SUMMARY';
     activeSourceLabel = '預估實領薪資';
   }
-
-  const fixedRow = db.prepare('SELECT COALESCE(SUM(monthly_amount), 0) AS total_fixed FROM fixed_expenses WHERE is_active = 1').get();
-  const fixedAndInstallments = Number(fixedRow.total_fixed) || 0;
-
-  const spentRow = db.prepare(`
-    SELECT
-      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP') THEN personal_amount ELSE 0 END), 0) AS total_spent,
-      COALESCE(SUM(CASE WHEN status = 'PENDING' THEN personal_amount ELSE 0 END), 0) AS pending_spent,
-      COALESCE(SUM(CASE WHEN status = 'SETTLED' THEN personal_amount ELSE 0 END), 0) AS settled_spent,
-      COALESCE(SUM(CASE WHEN status = 'UNKNOWN_GAP' THEN personal_amount ELSE 0 END), 0) AS gap_spent,
-      COALESCE(SUM(CASE WHEN status IN ('PENDING', 'SETTLED', 'UNKNOWN_GAP') AND tx_date = ? THEN personal_amount ELSE 0 END), 0) AS today_spent
-    FROM transactions WHERE cycle_key = ?
-  `).get(refDate, cycle.cycle_key);
-
-  const totalSpent = Number(spentRow.total_spent) || 0;
-  const todaySpent = Number(spentRow.today_spent) || 0;
 
   const startMs = new Date(`${cycle.start_date}T00:00:00`).getTime();
   const endMs = new Date(`${cycle.end_date}T00:00:00`).getTime();
@@ -334,7 +350,7 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
 
   let projectedBrokeDate = null, daysUntilBroke = null, overdraftDays = 0, bankruptcyWarningText = null;
   const effectiveBurnVelocity = Math.max(avgDailyBurnRate, todaySpent);
-  const isInitialZeroState = effectiveIncome === 0 && fixedAndInstallments === 0 && totalSpent === 0;
+  const isInitialZeroState = effectiveIncome === 0 && fixedAndInstallments === 0 && totalSpent === 0 && totalDeposited === 0;
 
   if (!isInitialZeroState && remainingBudget <= 0) {
     daysUntilBroke = 0;
@@ -355,23 +371,14 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
   }
 
   const tier = isInitialZeroState
-    ? (currMonthEstNet > 0 && mappingMode === 'NEXT_MONTH_PAY'
-        ? {
-            code: 'WEALTHY',
-            emoji: '⏳',
-            label: '下月薪資累積中 · 待設目前預算',
-            rangeText: `下月預估 $${currMonthEstNet.toLocaleString()}`,
-            themeColor: 'emerald',
-            advice: `⏳ 時間對照提醒：您在班表登記的 ${Number(accumulatingShiftMonth.slice(5))} 月份排班（預估實領 $${currMonthEstNet.toLocaleString()}）是下個月才發的薪水！請在下方「時間對照卡」輸入您現在手頭可用的薪水，或點選「切換為當月抵用」。`
-          }
-        : {
-            code: 'WEALTHY',
-            emoji: '✨',
-            label: '初始待設定狀態',
-            rangeText: '請輸入本月薪資',
-            themeColor: 'emerald',
-            advice: '帳本已歸零為初始狀態！請點選右上角「💰 設定薪資 / 班表同步」輸入您目前的薪資與時薪，並新增您的固定扣款與消費。'
-          })
+    ? {
+        code: 'WEALTHY',
+        emoji: '🏧',
+        label: '等待 ATM 存款或登記現金',
+        rangeText: '自動偵測金融卡存款',
+        themeColor: 'emerald',
+        advice: '💡 領現金再去 ATM 存進金融卡時，系統會自動偵測玉山「存款通知」並累加可用預算！你也可以在下方直接登記皮包現金與悠遊卡消費。'
+      }
     : evaluateSurvivalTier(dailySafeBudget);
 
   // 計算下個發薪週期 (Next Payday Cycle) 供時間對照顯示
@@ -438,6 +445,7 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
     },
     budget: {
       effectiveIncome, fixedAndInstallments, disposablePool, totalSpent,
+      totalDeposited, atmDeposited, depositCount, todayDeposited, cashSpent,
       pendingSpent: Number(spentRow.pending_spent) || 0, settledSpent: Number(spentRow.settled_spent) || 0,
       gapSpent: Number(spentRow.gap_spent) || 0, todaySpent, remainingBudget, dailySafeBudget,
       idealDailyBudget, avgDailyBurnRate, isTodayOverspent: isInitialZeroState ? false : isTodayOverspent, overdraftDays,

@@ -251,20 +251,33 @@ class PortableSqliteDb {
     }
 
     if (/AS\s+total_spent/i.test(sql) && /FROM\s+transactions\s+WHERE\s+cycle_key\s*=\s*\?/i.test(sql)) {
-      const [refDate, cycleKey] = params;
+      const refDate = params[0];
+      const cycleKey = params[params.length - 1];
       const rows = this.tables.transactions.filter(t => String(t.cycle_key) === String(cycleKey));
-      let total_spent = 0, pending_spent = 0, settled_spent = 0, gap_spent = 0, today_spent = 0;
+      let total_spent = 0, pending_spent = 0, settled_spent = 0, cash_spent = 0, gap_spent = 0, today_spent = 0;
+      let total_deposited = 0, atm_deposited = 0, deposit_count = 0, today_deposited = 0;
       for (const t of rows) {
         const amt = Number(t.personal_amount) || 0;
-        if (['PENDING', 'SETTLED', 'UNKNOWN_GAP'].includes(t.status)) {
+        const effAmt = Number(t.effective_amount) || 0;
+        if (['PENDING', 'SETTLED', 'UNKNOWN_GAP', 'CASH_SPENT'].includes(t.status)) {
           total_spent += amt;
           if (t.tx_date === refDate) today_spent += amt;
         }
         if (t.status === 'PENDING') pending_spent += amt;
-        if (t.status === 'SETTLED') settled_spent += amt;
+        if (['SETTLED', 'CASH_SPENT'].includes(t.status)) settled_spent += amt;
+        if (t.status === 'CASH_SPENT') cash_spent += effAmt;
         if (t.status === 'UNKNOWN_GAP') gap_spent += amt;
+        if (t.status === 'DEPOSIT') {
+          total_deposited += effAmt;
+          if (t.category !== '薪資入帳') atm_deposited += effAmt;
+          deposit_count += 1;
+          if (t.tx_date === refDate) today_deposited += effAmt;
+        }
       }
-      return { total_spent, pending_spent, settled_spent, gap_spent, today_spent };
+      return {
+        total_spent, pending_spent, settled_spent, cash_spent, gap_spent, today_spent,
+        total_deposited, atm_deposited, deposit_count, today_deposited
+      };
     }
 
     const id1 = sql.match(/^SELECT\s+[\s\S]+?\s+FROM\s+(user_settings|wallet_tank)\s+WHERE\s+id\s*=\s*1$/i);
@@ -354,7 +367,7 @@ class PortableSqliteDb {
         .filter(l => l.channel_type === 'CHANNEL_A_AUTH' && l.dedupe_hash === hash)
         .sort((a, b) => b.id - a.id)
         .slice(0, 5)
-        .map(l => ({ id: l.id, received_at: l.received_at, linked_tx_id: l.linked_tx_id }));
+        .map(l => ({ id: l.id, received_at: l.received_at, linked_tx_id: l.linked_tx_id, raw_text: l.raw_text }));
     }
 
     if (/FROM\s+transactions\s+WHERE\s+status\s+IN\s*\('PENDING',\s*'TEMP_HOLD'\)\s+AND\s+is_reconciled_locked\s*=\s*0/i.test(sql)) {
@@ -379,7 +392,7 @@ class PortableSqliteDb {
       const [startStr, endStr] = params;
       return this.tables.transactions
         .filter(t =>
-          ['PENDING', 'SETTLED'].includes(t.status) &&
+          ['PENDING', 'SETTLED', 'CASH_SPENT'].includes(t.status) &&
           Number(t.effective_amount) > 0 &&
           Number(t.effective_amount) < 200 &&
           String(t.tx_date) >= String(startStr) &&

@@ -10,6 +10,14 @@ const fmtMoney = n => '$' + Number(n || 0).toLocaleString();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const NOTIFICATION_PRESETS = {
+  atm_deposit: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return `【玉山銀行】存款通知：您的玉山帳戶(末四碼1234)於 ${today} 15:20 於 ATM 現金存入 NT$5,000 元，帳戶可用餘額 NT$18,500 元。`;
+  },
+  cardless_deposit: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return `【玉山Wallet】臺幣帳戶入帳通知：您的帳戶於 ${today} 18:10 完成無卡存款存入 新臺幣 3,000 元。`;
+  },
   apple_pay_tap: () => {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
     return `【Apple Pay 感應刷卡】您的 玉山銀行卡 於 ${today} 15:30 在「星巴克」使用 Apple Pay 一般消費 NT$155 元。`;
@@ -141,23 +149,23 @@ function renderDashboard(state) {
   const alertsHtml = [];
   if (survival.budget.bankruptcyWarningText) {
     alertsHtml.push(`
-      <div class="rounded-2xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-xs font-semibold text-rose-700 flex items-center justify-between gap-2">
+      <div class="rounded-2xl bg-rose-500/12 border border-rose-500/25 px-4 py-3 text-xs font-medium text-rose-300 flex items-center justify-between gap-3">
         <span>⚠️ ${esc(survival.budget.bankruptcyWarningText)}</span>
       </div>
     `);
   }
   for (const gh of (ghostHolds || [])) {
     alertsHtml.push(`
-      <div class="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-2.5 text-xs font-medium text-amber-800 flex items-center justify-between gap-2">
+      <div class="rounded-2xl bg-amber-500/12 border border-amber-500/25 px-4 py-3 text-xs font-medium text-amber-300 flex items-center justify-between gap-3">
         <span>👻 ${esc(gh.merchant)} $${gh.amount} 逾 ${gh.ageDays} 天未請款</span>
-        <button data-cancel-tx="${gh.transactionId}" class="btn-press shrink-0 px-2.5 py-1 rounded-full bg-amber-200/70 text-amber-900 font-semibold text-[11px]">退單解圈</button>
+        <button data-cancel-tx="${gh.transactionId}" class="btn-press shrink-0 px-3 py-1.5 rounded-full bg-amber-500/20 text-amber-200 font-semibold text-xs border border-amber-500/30">退單解圈</button>
       </div>
     `);
   }
   $('#alertStack').innerHTML = alertsHtml.join('');
 
   const mainCard = $('#survivalMainCard');
-  mainCard.className = `bento-card p-6 space-y-5 tier-glow-${survival.tier.code}`;
+  mainCard.className = `bento-card p-6 sm:p-8 space-y-6 tier-glow-${survival.tier.code}`;
   $('#cycleDateLabel').textContent = `${survival.cycle.startDate.slice(5)} ~ ${survival.cycle.endDate.slice(5)}`;
   $('#tierBadge').textContent = `${survival.tier.emoji} ${survival.tier.label}`;
   $('#dailySafeAmount').textContent = fmtMoney(survival.budget.dailySafeBudget);
@@ -177,7 +185,9 @@ function renderDashboard(state) {
   $('#netFactorVal').textContent = `×${survival.cycle.netPayFactor}`;
   $('#shiftNetVal').textContent = fmtMoney(survival.budget.effectiveIncome);
 
-  if (survival.cycle.isSalarySettled) {
+  if (survival.budget.atmDeposited > 0) {
+    $('#actualSalaryNote').textContent = `🏧 本月金融卡累計存入 $${Number(survival.budget.atmDeposited || 0).toLocaleString()} (${survival.budget.depositCount || 0} 筆)`;
+  } else if (survival.cycle.isSalarySettled) {
     $('#actualSalaryNote').textContent = `實領薪資 $${Number(survival.cycle.actualSalary || 0).toLocaleString()}`;
   } else {
     $('#actualSalaryNote').textContent = `預估實領 $${Number(survival.cycle.estimatedNetPay || 0).toLocaleString()} (×${survival.cycle.netPayFactor})`;
@@ -187,6 +197,12 @@ function renderDashboard(state) {
   $('#pendingSpentVal').textContent = fmtMoney(survival.budget.pendingSpent);
   $('#settledSpentVal').textContent = fmtMoney(survival.budget.settledSpent);
   $('#gapSpentVal').textContent = fmtMoney(survival.budget.gapSpent);
+  if ($('#cashSpentVal')) $('#cashSpentVal').textContent = fmtMoney(survival.budget.cashSpent || 0);
+  if ($('#cardDepositedTotalVal')) $('#cardDepositedTotalVal').textContent = '+' + fmtMoney(survival.budget.totalDeposited || 0);
+  if ($('#depositCountBadge')) $('#depositCountBadge').textContent = survival.budget.depositCount || 0;
+  if ($('#txSummaryDeposited')) $('#txSummaryDeposited').textContent = '+' + fmtMoney(survival.budget.totalDeposited || 0);
+  if ($('#txSummaryCardSpent')) $('#txSummaryCardSpent').textContent = '-' + fmtMoney((survival.budget.totalSpent || 0));
+  if ($('#txSummaryCashSpent')) $('#txSummaryCashSpent').textContent = '-' + fmtMoney(survival.budget.cashSpent || 0);
 
   renderTransactionsList(transactions);
   renderCooldownSection(cooldownCart);
@@ -217,6 +233,8 @@ function renderDashboard(state) {
 
 function statusLabelOf(status) {
   const map = {
+    DEPOSIT: '💰 金融卡存款',
+    CASH_SPENT: '💵 現金消費',
     PENDING: '🟡 圈存預扣',
     SETTLED: '🟢 已結算',
     TEMP_HOLD: '⛽ 預授權',
@@ -230,69 +248,98 @@ function statusLabelOf(status) {
 function renderTransactionsList(transactions = []) {
   const filtered = currentTxFilter === 'ALL'
     ? transactions
-    : transactions.filter(t => t.status === currentTxFilter);
+    : (currentTxFilter === 'SPENT_ALL'
+        ? transactions.filter(t => ['PENDING', 'SETTLED', 'CASH_SPENT', 'UNKNOWN_GAP'].includes(t.status))
+        : transactions.filter(t => t.status === currentTxFilter));
 
   const container = $('#txListContainer');
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="bento-card p-8 text-center text-xs text-slate-400">尚無符合條件的交易紀錄</div>`;
+    container.innerHTML = `<div class="bento-card p-8 text-center text-sm text-[#8E95A5]">尚無符合條件的交易或存款紀錄</div>`;
     return;
   }
 
   container.innerHTML = filtered.map(tx => {
-    const lockBadge = tx.is_reconciled_locked
-      ? `<span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-medium"><i class="fa-solid fa-lock mr-0.5"></i>已核銷</span>`
-      : `<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-medium">待請款</span>`;
+    const isDeposit = tx.status === 'DEPOSIT';
+    const isCashSpent = tx.status === 'CASH_SPENT';
+
+    const lockBadge = isDeposit
+      ? `<span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 border border-emerald-500/25 text-xs font-medium"><i class="fa-solid fa-building-columns mr-1"></i>已入帳</span>`
+      : (isCashSpent
+          ? `<span class="px-2.5 py-0.5 rounded-full bg-amber-500/12 text-amber-300 border border-amber-500/25 text-xs font-medium">💵 皮包扣現</span>`
+          : (tx.is_reconciled_locked
+              ? `<span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 border border-emerald-500/25 text-xs font-medium"><i class="fa-solid fa-lock mr-1"></i>已核銷</span>`
+              : `<span class="px-2.5 py-0.5 rounded-full bg-white/[0.06] text-[#8E95A5] text-xs font-medium">待請款</span>`));
 
     const fxBadge = tx.fx_fee_diff !== 0
-      ? `<span class="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[11px] font-medium">匯差 ${tx.fx_fee_diff > 0 ? '+' : ''}$${tx.fx_fee_diff}</span>`
+      ? `<span class="px-2.5 py-0.5 rounded-full bg-sky-500/12 text-sky-300 border border-sky-500/25 text-xs font-medium">匯差 ${tx.fx_fee_diff > 0 ? '+' : ''}$${tx.fx_fee_diff}</span>`
       : '';
 
     const isApplePayTx = /APPLE\s*PAY|感應刷卡/i.test(`${tx.channel_a_raw || ''} ${tx.reconcile_note || ''} ${tx.raw_merchant || ''}`);
     const applePayBadge = isApplePayTx
-      ? `<span class="px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-semibold"><i class="fa-brands fa-apple mr-0.5"></i>Apple Pay</span>`
+      ? `<span class="px-2.5 py-0.5 rounded-full bg-white/[0.12] text-[#F5F5F7] text-xs font-semibold"><i class="fa-brands fa-apple mr-1"></i>Apple Pay</span>`
       : '';
 
     const actions = [];
     if (tx.status === 'TEMP_HOLD') {
-      actions.push(`<button data-gas-tx="${tx.id}" class="btn-press px-3 py-1.5 rounded-full bg-sky-600 text-white font-semibold text-xs">⛽ 輸入加油金額</button>`);
+      actions.push(`<button data-gas-tx="${tx.id}" class="btn-press btn-primary px-3.5 py-2 rounded-xl text-xs">⛽ 輸入加油金額</button>`);
     }
     if (tx.status === 'PENDING' || tx.status === 'SETTLED') {
-      actions.push(`<button data-split-tx="${tx.id}" data-split-amt="${tx.effective_amount}" data-split-name="${esc(tx.normalized_merchant)}" class="btn-press px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 font-semibold text-xs">🤝 聚餐拆帳</button>`);
+      actions.push(`<button data-split-tx="${tx.id}" data-split-amt="${tx.effective_amount}" data-split-name="${esc(tx.normalized_merchant)}" class="btn-press btn-secondary px-3.5 py-2 rounded-xl text-xs">🤝 聚餐拆帳</button>`);
     }
     if (tx.status === 'PENDING') {
-      actions.push(`<button data-cancel-tx="${tx.id}" class="btn-press px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 font-semibold text-xs">❄️ 退單解圈</button>`);
+      actions.push(`<button data-cancel-tx="${tx.id}" class="btn-press btn-secondary px-3.5 py-2 rounded-xl text-xs">❄️ 退單解圈</button>`);
     }
     if (tx.status === 'UNKNOWN_GAP') {
-      actions.push(`<button data-gap-tx="${tx.id}" data-gap-amt="${tx.personal_amount}" class="btn-press px-3 py-1.5 rounded-full bg-rose-600 text-white font-semibold text-xs">✨ 拆分黑洞</button>`);
+      actions.push(`<button data-gap-tx="${tx.id}" data-gap-amt="${tx.personal_amount}" class="btn-press btn-primary px-3.5 py-2 rounded-xl text-xs">✨ 拆分黑洞</button>`);
+    }
+    if (isDeposit || isCashSpent) {
+      actions.push(`<button data-del-tx="${tx.id}" class="btn-press btn-danger-soft px-3.5 py-2 rounded-xl text-xs">🗑️ 刪除此筆紀錄</button>`);
     }
 
+    let amountHtml;
+    if (isDeposit) {
+      amountHtml = `<div class="text-xl font-bold tabular-nums text-emerald-400">+${fmtMoney(tx.effective_amount)}</div>`;
+    } else if (isCashSpent) {
+      amountHtml = `<div class="text-xl font-bold tabular-nums text-sky-400">-${fmtMoney(tx.effective_amount)}</div>`;
+    } else {
+      amountHtml = `
+        <div class="text-xl font-bold tabular-nums ${tx.personal_amount > 0 ? 'text-[#F5F5F7]' : 'text-[#8E95A5]'}">
+          ${tx.personal_amount > 0 ? '-' + fmtMoney(tx.personal_amount) : '$0'}
+        </div>
+      `;
+    }
+
+    const detailRightMeta = isDeposit
+      ? `存入金額 +$${tx.effective_amount}`
+      : (isCashSpent
+          ? `現金消費 $${tx.effective_amount}${tx.personal_amount > 0 ? ' (同步扣預算)' : ' (僅扣皮包現金)'}`
+          : `圈存 $${tx.auth_amount}${tx.settled_amount !== null ? ` · 請款 $${tx.settled_amount}` : ''}`);
+
     return `
-      <details class="group bento-card p-5">
-        <summary class="cursor-pointer list-none flex items-center justify-between gap-3">
-          <div class="space-y-1.5 min-w-0">
-            <div class="text-base font-semibold text-slate-900 truncate">${esc(tx.normalized_merchant)}</div>
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span class="px-2 py-0.5 rounded-full text-[11px] font-medium badge-${tx.status}">${statusLabelOf(tx.status)}</span>
+      <details class="group bento-card p-6 ${isDeposit ? 'border-emerald-500/25' : ''}">
+        <summary class="cursor-pointer list-none flex items-center justify-between gap-4">
+          <div class="space-y-2 min-w-0">
+            <div class="text-base font-semibold text-[#F5F5F7] truncate">${esc(tx.normalized_merchant)}</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium badge-${tx.status}">${statusLabelOf(tx.status)}</span>
               ${applePayBadge}
               ${lockBadge}
               ${fxBadge}
-              <span class="text-xs text-slate-400 tabular-nums">${esc(tx.tx_date.slice(5))}</span>
+              <span class="text-xs text-[#8E95A5] tabular-nums">${esc(tx.tx_date.slice(5))}</span>
             </div>
           </div>
-          <div class="text-right shrink-0">
-            <div class="text-lg font-bold tabular-nums ${tx.personal_amount > 0 ? 'text-slate-900' : 'text-slate-400'}">
-              ${tx.personal_amount > 0 ? '-' + fmtMoney(tx.personal_amount) : '$0'}
-            </div>
-            <div class="text-[11px] text-slate-400">細節 <i class="fa-solid fa-chevron-down text-[9px] group-open:rotate-180 transition-transform"></i></div>
+          <div class="text-right shrink-0 space-y-1">
+            ${amountHtml}
+            <div class="text-xs text-[#8E95A5]">細節 <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i></div>
           </div>
         </summary>
-        <div class="mt-3 pt-3 border-t border-slate-100 space-y-2.5 text-xs text-slate-500">
+        <div class="mt-4 pt-4 border-t border-white/[0.07] space-y-3 text-xs text-[#8E95A5]">
           <div class="flex flex-wrap justify-between gap-2">
             <span>分類：${esc(tx.category)}</span>
-            <span class="tabular-nums">圈存 $${tx.auth_amount}${tx.settled_amount !== null ? ` · 請款 $${tx.settled_amount}` : ''}</span>
+            <span class="tabular-nums text-[#D1D5DB]">${detailRightMeta}</span>
           </div>
-          ${tx.reconcile_note ? `<div class="bg-slate-50 rounded-xl p-2.5 text-slate-600">${esc(tx.reconcile_note)}</div>` : ''}
-          ${actions.length > 0 ? `<div class="flex flex-wrap gap-2 pt-1">${actions.join('')}</div>` : ''}
+          ${tx.reconcile_note ? `<div class="apple-inset !p-3 text-[#D1D5DB] leading-relaxed">${esc(tx.reconcile_note)}</div>` : ''}
+          ${actions.length > 0 ? `<div class="flex flex-wrap gap-2.5 pt-1">${actions.join('')}</div>` : ''}
         </div>
       </details>
     `;
@@ -311,7 +358,7 @@ function renderCooldownSection(cooldownCart) {
   const list = [...(cooldownCart.activeItems || []), ...(cooldownCart.abandonedItems || [])];
 
   if (list.length === 0) {
-    container.innerHTML = `<div class="bento-card p-8 text-center text-xs text-slate-400">目前冷卻清單為空，點選「➕ 我又想買東西了」開始防剁手評估</div>`;
+    container.innerHTML = `<div class="bento-card p-8 text-center text-sm text-[#8E95A5]">目前冷卻清單為空，點選「➕ 我又想買東西了」開始防剁手評估</div>`;
     return;
   }
 
@@ -321,57 +368,57 @@ function renderCooldownSection(cooldownCart) {
 
     if (item.status === 'ABANDONED') {
       return `
-        <div class="bento-card p-5 flex items-center justify-between gap-3 border-emerald-100">
-          <div class="space-y-1.5 min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="text-base font-semibold text-slate-900 truncate">${esc(item.item_name)}</span>
-              <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold">🏆 已忍住不買</span>
+        <div class="bento-card p-6 flex items-center justify-between gap-4 border-emerald-500/20">
+          <div class="space-y-2 min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-base font-semibold text-[#F5F5F7] truncate">${esc(item.item_name)}</span>
+              <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 border border-emerald-500/25 text-xs font-medium">🏆 已忍住不買</span>
             </div>
-            <div class="flex flex-wrap gap-1.5">
-              <span class="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-medium">⏱️ 省下 ${hoursNum}h 工時</span>
-              <span class="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-medium">☕ ${coffeeCups} 杯咖啡</span>
+            <div class="flex flex-wrap gap-2">
+              <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium">⏱️ 省下 ${hoursNum}h 工時</span>
+              <span class="px-2.5 py-0.5 rounded-full bg-white/[0.06] text-[#8E95A5] text-xs font-medium">☕ ${coffeeCups} 杯咖啡</span>
             </div>
           </div>
-          <div class="text-xl font-bold text-emerald-600 tabular-nums shrink-0">+${fmtMoney(item.amount)}</div>
+          <div class="text-xl font-bold text-emerald-400 tabular-nums shrink-0">+${fmtMoney(item.amount)}</div>
         </div>
       `;
     }
 
     const isUnlocked = item.status === 'UNLOCKED';
     return `
-      <div class="bento-card p-5 space-y-3 ${isUnlocked ? 'border-amber-200' : ''}">
-        <div class="flex items-start justify-between gap-3">
-          <div class="space-y-1.5 min-w-0">
-            <div class="text-base font-semibold text-slate-900">${esc(item.item_name)}</div>
-            <div class="flex flex-wrap gap-1.5">
-              <span class="px-2.5 py-0.5 rounded-full ${isUnlocked ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'} text-[11px] font-semibold">
+      <div class="bento-card p-6 space-y-4 ${isUnlocked ? 'border-amber-500/30' : ''}">
+        <div class="flex items-start justify-between gap-4">
+          <div class="space-y-2 min-w-0">
+            <div class="text-base font-semibold text-[#F5F5F7]">${esc(item.item_name)}</div>
+            <div class="flex flex-wrap gap-2">
+              <span class="px-2.5 py-0.5 rounded-full ${isUnlocked ? 'bg-amber-500/15 text-amber-300 border border-amber-500/25' : 'bg-rose-500/15 text-rose-300 border border-rose-500/25'} text-xs font-medium">
                 ${isUnlocked ? '🔓 已滿 72h 可決定' : `⏳ 倒數 ${item.remainingHours}h`}
               </span>
-              <span class="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-medium">⏱️ ${hoursNum}h 工時</span>
-              <span class="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-medium">☕ ${coffeeCups} 杯咖啡</span>
+              <span class="px-2.5 py-0.5 rounded-full bg-white/[0.06] text-[#D1D5DB] text-xs font-medium">⏱️ ${hoursNum}h 工時</span>
+              <span class="px-2.5 py-0.5 rounded-full bg-white/[0.06] text-[#8E95A5] text-xs font-medium">☕ ${coffeeCups} 杯咖啡</span>
             </div>
           </div>
-          <div class="text-xl font-bold text-slate-900 tabular-nums shrink-0">${fmtMoney(item.amount)}</div>
+          <div class="text-xl font-bold text-[#F5F5F7] tabular-nums shrink-0">${fmtMoney(item.amount)}</div>
         </div>
 
         <details class="group">
-          <summary class="cursor-pointer list-none text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
+          <summary class="cursor-pointer list-none text-xs text-[#8E95A5] hover:text-[#F5F5F7] flex items-center gap-1.5">
             <span>查看靈魂拷問與預算衝擊</span>
-            <i class="fa-solid fa-chevron-down text-[9px] group-open:rotate-180 transition-transform"></i>
+            <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i>
           </summary>
-          <div class="mt-2 rounded-2xl bg-slate-50 p-3 text-xs text-slate-600 whitespace-pre-line leading-relaxed border border-slate-100">${esc(item.ai_roast_message)}</div>
+          <div class="mt-3 apple-inset !p-4 text-xs text-[#D1D5DB] whitespace-pre-line leading-relaxed">${esc(item.ai_roast_message)}</div>
         </details>
 
-        <div class="flex gap-2 pt-1">
-          <button data-cd-resolve="${item.id}|ABANDON" class="btn-press flex-1 py-2.5 rounded-2xl bg-emerald-600 text-white font-semibold text-xs shadow-xs">
+        <div class="flex gap-3 pt-1">
+          <button data-cd-resolve="${item.id}|ABANDON" class="btn-press btn-primary flex-1 py-3 text-xs">
             💪 放棄購買（省下 ${fmtMoney(item.amount)}）
           </button>
           ${!isUnlocked ? `
-            <button data-cd-ff="${item.id}" class="btn-press px-3 py-2.5 rounded-2xl bg-slate-100 text-slate-600 font-semibold text-xs">
-              ⏩ 滿72h
+            <button data-cd-ff="${item.id}" class="btn-press btn-secondary px-4 py-3 text-xs">
+              ⏩ 滿 72h
             </button>
           ` : `
-            <button data-cd-resolve="${item.id}|PURCHASE" class="btn-press px-3 py-2.5 rounded-2xl bg-rose-50 text-rose-600 font-semibold text-xs">
+            <button data-cd-resolve="${item.id}|PURCHASE" class="btn-press btn-danger-soft px-4 py-3 text-xs">
               仍要買
             </button>
           `}
@@ -396,37 +443,37 @@ function renderRadarSection(radar) {
 
   const lb = $('#vampireLeaderboard');
   if (!vr.leaderboard || vr.leaderboard.length === 0) {
-    lb.innerHTML = `<div class="text-center py-4 text-xs text-slate-400">本週尚無單筆低於 $200 的小額消費</div>`;
+    lb.innerHTML = `<div class="text-center py-6 text-xs text-[#8E95A5]">本週尚無單筆低於 $200 的小額消費</div>`;
   } else {
     lb.innerHTML = vr.leaderboard.map((g, idx) => `
-      <div class="rounded-2xl ${g.isVampireAlert ? 'bg-rose-50/70 border-rose-200' : 'bg-slate-50 border-slate-100'} border p-3.5 flex items-center justify-between">
-        <div>
-          <div class="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
-            <span class="px-1.5 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] text-slate-500">#${idx + 1}</span>
+      <div class="apple-inset ${g.isVampireAlert ? 'border-rose-500/30 bg-rose-500/10' : ''} flex items-center justify-between gap-3">
+        <div class="space-y-1">
+          <div class="text-sm font-semibold text-[#F5F5F7] flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/[0.08] text-xs text-[#8E95A5] tabular-nums">#${idx + 1}</span>
             <span>${esc(g.name)}</span>
-            ${g.isVampireAlert ? '<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-semibold">高頻失血</span>' : ''}
+            ${g.isVampireAlert ? '<span class="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-medium">高頻失血</span>' : ''}
           </div>
-          <div class="text-[11px] text-slate-400 mt-0.5">7 天內 ${g.count} 次 · ${esc(g.category)}</div>
+          <div class="text-xs text-[#8E95A5]">7 天內 ${g.count} 次 · ${esc(g.category)}</div>
         </div>
-        <div class="text-sm font-bold text-rose-600 tabular-nums">-${fmtMoney(g.totalAmount)}</div>
+        <div class="text-base font-bold text-rose-400 tabular-nums">-${fmtMoney(g.totalAmount)}</div>
       </div>
     `).join('');
   }
 
   $('#subAlertsWrap').innerHTML = (sub.subscriptionAlerts || []).map(a => `
-    <div class="rounded-2xl bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-xs font-semibold text-amber-800">${esc(a)}</div>
+    <div class="rounded-xl bg-amber-500/12 border border-amber-500/25 px-4 py-3 text-xs font-medium text-amber-300">${esc(a)}</div>
   `).join('');
 
   $('#futureSalaryBars').innerHTML = (sub.futureMonths || []).map(m => {
     const pct = Math.min(100, Math.max(0, Number(m.preemptedPercent) || 0));
     return `
-      <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3.5 space-y-2">
+      <div class="apple-inset space-y-2.5">
         <div class="flex items-center justify-between text-xs">
-          <span class="font-semibold text-slate-800">${esc(m.yearMonth)} 薪水預支</span>
-          <span class="font-bold tabular-nums ${pct >= 30 ? 'text-rose-600' : 'text-amber-600'}">${m.preemptedPercent}% (${fmtMoney(m.totalLockedAmount)})</span>
+          <span class="font-semibold text-[#D1D5DB]">${esc(m.yearMonth)} 薪水預支</span>
+          <span class="font-bold tabular-nums ${pct >= 30 ? 'text-rose-400' : 'text-amber-400'}">${m.preemptedPercent}% (${fmtMoney(m.totalLockedAmount)})</span>
         </div>
-        <div class="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
-          <div class="h-full rounded-full ${pct >= 30 ? 'bg-rose-500' : 'bg-amber-500'}" style="width: ${pct}%"></div>
+        <div class="w-full h-2 rounded-full bg-white/[0.08] overflow-hidden">
+          <div class="h-full rounded-full ${pct >= 30 ? 'bg-rose-400' : 'bg-amber-400'}" style="width: ${pct}%"></div>
         </div>
       </div>
     `;
@@ -434,19 +481,19 @@ function renderRadarSection(radar) {
 
   const fxItems = sub.items || [];
   $('#fixedExpenseList').innerHTML = fxItems.length === 0
-    ? `<div class="text-center py-3 text-xs text-slate-400">尚未設定固定扣款或分期</div>`
+    ? `<div class="text-center py-4 text-xs text-[#8E95A5]">尚未設定固定扣款或分期</div>`
     : fxItems.map(f => `
-      <div class="rounded-2xl bg-slate-50 border border-slate-100 px-3.5 py-2.5 flex items-center justify-between text-xs">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 text-[10px] font-medium">
+      <div class="apple-inset !py-3 !px-4 flex items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <span class="px-2.5 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[#D1D5DB] text-xs font-medium shrink-0">
             ${f.expense_type === 'SUBSCRIPTION' ? '訂閱' : (f.expense_type === 'INSTALLMENT' ? `分期餘${f.remaining_installments}期` : '固定')}
           </span>
-          <span class="font-semibold text-slate-900 truncate">${esc(f.name)}</span>
-          <span class="text-slate-400">${f.billing_day}號</span>
+          <span class="font-semibold text-sm text-[#F5F5F7] truncate">${esc(f.name)}</span>
+          <span class="text-[#8E95A5] shrink-0">${f.billing_day}號</span>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
-          <span class="font-bold text-slate-900 tabular-nums">${fmtMoney(f.monthly_amount)}</span>
-          <button data-del-fixed="${f.id}" class="text-slate-400 hover:text-rose-600 px-1">✕</button>
+        <div class="flex items-center gap-3 shrink-0">
+          <span class="font-bold text-sm text-[#F5F5F7] tabular-nums">${fmtMoney(f.monthly_amount)}</span>
+          <button data-del-fixed="${f.id}" class="text-[#8E95A5] hover:text-rose-400 px-1.5 py-1 rounded-lg hover:bg-white/[0.06] transition-colors">✕</button>
         </div>
       </div>
     `).join('');
@@ -457,6 +504,20 @@ function renderPatchesSection(walletTank, splitBills) {
     $('#tankEasycardVal').textContent = fmtMoney(walletTank.easycardBalance);
     $('#tankCashVal').textContent = fmtMoney(walletTank.cashBalance);
 
+    const logs = walletTank.logs || [];
+    const lastCashLog = logs.find(l => l.tank_type === 'CASH');
+    const lastEasyLog = logs.find(l => l.tank_type === 'EASYCARD');
+    if ($('#tankCashLastNote')) {
+      $('#tankCashLastNote').innerHTML = lastCashLog
+        ? `最新：<b class="${lastCashLog.delta_amount >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${lastCashLog.delta_amount >= 0 ? '+' : '-'}$${Math.abs(lastCashLog.delta_amount)}</b> (${esc(lastCashLog.note)})`
+        : '可輸入 60、+60 加值或 -60 扣款';
+    }
+    if ($('#tankEasyLastNote')) {
+      $('#tankEasyLastNote').innerHTML = lastEasyLog
+        ? `最新：<b class="${lastEasyLog.delta_amount >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${lastEasyLog.delta_amount >= 0 ? '+' : '-'}$${Math.abs(lastEasyLog.delta_amount)}</b> (${esc(lastEasyLog.note)})`
+        : '可輸入 60、+60 加值或 -60 扣款';
+    }
+
     const tBanner = $('#tankAuditBanner');
     if (walletTank.needsAuditAlert && walletTank.auditAlertText) {
       tBanner.textContent = walletTank.auditAlertText;
@@ -465,10 +526,10 @@ function renderPatchesSection(walletTank, splitBills) {
       tBanner.classList.add('hidden');
     }
 
-    $('#tankLogsList').innerHTML = (walletTank.logs || []).map(l => `
-      <div class="flex items-center justify-between text-xs bg-white rounded-xl px-2.5 py-1.5 border border-slate-100">
-        <span class="text-slate-600">[${l.tank_type === 'EASYCARD' ? '悠遊卡' : '現金'}] ${esc(l.note)}</span>
-        <span class="font-bold tabular-nums ${l.delta_amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${l.delta_amount >= 0 ? '+' : ''}${l.delta_amount} (餘 $${l.balance_after})</span>
+    $('#tankLogsList').innerHTML = logs.map(l => `
+      <div class="flex items-center justify-between text-xs bg-black/25 rounded-xl px-3.5 py-2.5 border border-white/[0.06]">
+        <span class="text-[#D1D5DB]">[${l.tank_type === 'EASYCARD' ? '悠遊卡' : '現金'}] ${esc(l.note)}</span>
+        <span class="font-semibold tabular-nums ${l.delta_amount >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${l.delta_amount >= 0 ? '+' : ''}${l.delta_amount} (餘 $${l.balance_after})</span>
       </div>
     `).join('');
   }
@@ -477,18 +538,18 @@ function renderPatchesSection(walletTank, splitBills) {
     $('#receivableTotalVal').textContent = fmtMoney(splitBills.pendingReceivableTotal);
     const container = $('#splitBillsList');
     if (!splitBills.items || splitBills.items.length === 0) {
-      container.innerHTML = `<div class="text-center py-3 text-xs text-slate-400">尚無代墊拆帳紀錄</div>`;
+      container.innerHTML = `<div class="text-center py-4 text-xs text-[#8E95A5]">尚無代墊拆帳紀錄</div>`;
     } else {
       container.innerHTML = splitBills.items.map(s => `
-        <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3 flex items-center justify-between gap-2 text-xs">
-          <div class="space-y-0.5 min-w-0">
-            <div class="font-semibold text-slate-900 truncate">${esc(s.normalized_merchant || '聚餐消費')} · 總額 ${fmtMoney(s.total_amount)}</div>
-            <div class="text-slate-500">自付 ${fmtMoney(s.self_amount)} · 應收 <b class="text-emerald-600">${fmtMoney(s.receivable_amount)}</b> (${esc(s.debtor_name)})</div>
+        <div class="apple-inset flex items-center justify-between gap-3 text-xs">
+          <div class="space-y-1 min-w-0">
+            <div class="font-semibold text-sm text-[#F5F5F7] truncate">${esc(s.normalized_merchant || '聚餐消費')} · 總額 ${fmtMoney(s.total_amount)}</div>
+            <div class="text-[#8E95A5]">自付 ${fmtMoney(s.self_amount)} · 應收 <b class="text-emerald-400">${fmtMoney(s.receivable_amount)}</b> (${esc(s.debtor_name)})</div>
           </div>
           <div class="shrink-0">
             ${s.is_repaid
-              ? `<span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold">✅ 已收訖</span>`
-              : `<button data-settle-split="${s.id}" class="btn-press px-3 py-1.5 rounded-full bg-emerald-600 text-white font-semibold text-xs">結清</button>`
+              ? `<span class="px-3 py-1 rounded-full bg-emerald-500/12 text-emerald-300 border border-emerald-500/25 text-xs font-medium">✅ 已收訖</span>`
+              : `<button data-settle-split="${s.id}" class="btn-press btn-primary px-3.5 py-2 rounded-xl text-xs">結清</button>`
             }
           </div>
         </div>
@@ -518,8 +579,8 @@ function renderTimeMappingSection(tm, survival) {
       ? '🕒 次月發薪制（點此切換）'
       : '⚡ 當月抵用制（點此切換）';
     $('#btnToggleMappingMode').className = isNextMonthPay
-      ? 'btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold'
-      : 'btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[10px] font-bold';
+      ? 'btn-press px-3 py-1 rounded-full bg-emerald-500/12 border border-emerald-500/25 text-emerald-300 text-xs font-semibold'
+      : 'btn-press px-3 py-1 rounded-full bg-[#0A84FF]/15 border border-[#0A84FF]/30 text-sky-300 text-xs font-semibold';
   }
 
   if ($('#tmCurrentCycleRange')) {
@@ -583,7 +644,7 @@ function renderTimeMappingSection(tm, survival) {
   }
   $$('[data-set-mapping-mode]').forEach(btn => {
     const active = btn.dataset.setMappingMode === tm.mappingMode;
-    btn.className = `mapping-mode-btn btn-press py-2 px-2 rounded-xl text-[11px] ${active ? 'bg-slate-900 text-white font-bold shadow-xs' : 'bg-white border border-amber-200 text-slate-700 font-semibold'}`;
+    btn.className = `mapping-mode-btn btn-press py-2 px-3 rounded-xl text-xs ${active ? 'btn-primary' : 'btn-secondary'}`;
   });
 }
 
@@ -609,7 +670,7 @@ function renderSettingsSection(settings) {
 function switchMainTab(target) {
   $$('[data-nav-tab]').forEach(b => {
     const active = b.dataset.navTab === target;
-    b.className = `nav-tab-btn btn-press py-1.5 rounded-2xl flex flex-col items-center gap-1 ${active ? 'text-slate-900 font-semibold' : 'text-slate-400 font-medium'}`;
+    b.className = `nav-tab-btn btn-press py-2 rounded-xl flex flex-col items-center gap-1 ${active ? 'text-[#0A84FF] font-semibold' : 'text-[#8E95A5] font-medium'}`;
   });
   $$('.tab-pane').forEach(p => p.classList.toggle('hidden', p.id !== `tab-${target}`));
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -618,7 +679,7 @@ function switchMainTab(target) {
 function switchRecordSubtab(subtab) {
   $$('[data-record-subtab]').forEach(b => {
     const active = b.dataset.recordSubtab === subtab;
-    b.className = `record-subtab-btn btn-press py-2 rounded-xl text-xs font-semibold ${active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`;
+    b.className = `record-subtab-btn btn-press py-2.5 rounded-xl text-xs ${active ? 'font-semibold bg-[#252A38] text-[#F5F5F7] shadow-sm' : 'font-medium text-[#8E95A5]'}`;
   });
   $('#subtab-cooldown')?.classList.toggle('hidden', subtab !== 'cooldown');
   $('#subtab-transactions')?.classList.toggle('hidden', subtab !== 'transactions');
@@ -639,7 +700,7 @@ function showAutoToast(message) {
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'autoSyncToastBar';
-    bar.className = 'fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[92%] rounded-2xl bg-slate-900/95 text-white px-4 py-2.5 text-xs font-semibold shadow-xl border border-slate-700 transition-opacity duration-300';
+    bar.className = 'fixed top-16 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] rounded-2xl bg-[#1D212D]/95 backdrop-blur-xl text-[#F5F5F7] px-4 py-3 text-xs font-medium shadow-2xl border border-white/[0.12] transition-opacity duration-300';
     document.body.appendChild(bar);
   }
   bar.textContent = message;
@@ -770,7 +831,7 @@ async function checkClipboardForBankNotification() {
     }
 
     if (clip.length > 1500) return;
-    const isSwipeNotif = /玉山|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|商店請款|薪資入帳/.test(clip)
+    const isSwipeNotif = /玉山|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|商店請款|薪資入帳|存款通知|存入通知|帳戶入帳|ATM|無卡存款|跨行存款|轉帳入帳/.test(clip)
       && /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(clip);
     if (!isSwipeNotif) return;
 
@@ -782,7 +843,10 @@ async function checkClipboardForBankNotification() {
     if (res && res.dashboard) {
       renderDashboard(res.dashboard);
       if (res.result && res.result.resultType !== 'DEBOUNCE_IGNORED') {
-        showAutoToast(`⚡ 自動偵測到刷卡通知：${res.result.parsed?.normalizedMerchant || ''} $${res.result.parsed?.amount || ''}`);
+        const isDep = res.result.resultType === 'DEPOSIT_RECORDED';
+        showAutoToast(isDep
+          ? `🏧 自動偵測金融卡存款：${res.result.parsed?.normalizedMerchant || ''} +$${res.result.parsed?.amount || ''}`
+          : `⚡ 自動偵測到刷卡通知：${res.result.parsed?.normalizedMerchant || ''} $${res.result.parsed?.amount || ''}`);
       }
     }
   } catch (_) {}
@@ -806,20 +870,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   try {
-    const localShift = readLocalShiftPayBridgePayload();
-    const data = await apiCall('/api/dashboard', localShift ? 'POST' : 'GET', localShift ? { autoShiftState: localShift } : null);
+    const data = await apiCall('/api/dashboard');
     renderDashboard(data);
   } catch (err) {
     console.error(err);
   }
 
-  // 監聽「打工薪水帳 V2」跨分頁 / 內嵌視窗即時同步事件 (免手動輸入 JSON)
+  // 監聽選用之「打工薪水帳 V2」內嵌視窗同步事件（僅更新班表領現參考，絕不覆蓋 ATM 存款預算）
   try {
     if (typeof BroadcastChannel !== 'undefined') {
       const bc = new BroadcastChannel('anti_broke_shift_sync');
       bc.addEventListener('message', ev => {
         if (ev.data && ev.data.type === 'SHIFT_STATE_UPDATED' && ev.data.payload) {
-          autoSyncShiftFromBridge(ev.data.payload, true);
+          autoSyncShiftFromBridge(ev.data.payload, false);
         }
       });
     }
@@ -827,17 +890,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.addEventListener('message', ev => {
     if (ev.data && ev.data.type === 'SHIFT_STATE_UPDATED' && ev.data.payload) {
-      autoSyncShiftFromBridge(ev.data.payload, true);
+      autoSyncShiftFromBridge(ev.data.payload, false);
     }
   });
 
-  window.addEventListener('storage', ev => {
-    if (ev.key === 'shiftpay.v1' || ev.key === 'shiftpay.v2.bridge') {
-      autoSyncShiftFromBridge(null, true);
-    }
-  });
-
-  // 定期 15 秒即時同步雲端與本機自動入帳的刷卡紀錄與排班薪資
+  // 定期 15 秒即時同步雲端與本機自動入帳的 ATM 存款與刷卡扣款紀錄
   setInterval(async () => {
     if (document.hidden) return;
     try {
@@ -852,9 +909,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderDashboard(latest);
         if (newTopTxId > prevTopTxId && latest.transactions?.[0]) {
           const topTx = latest.transactions[0];
-          showAutoToast(`💳 自動偵測新刷卡：${topTx.normalized_merchant} $${topTx.effective_amount}`);
+          if (topTx.status === 'DEPOSIT') {
+            showAutoToast(`🏧 自動偵測金融卡存款：${topTx.normalized_merchant} +$${topTx.effective_amount}`);
+          } else {
+            showAutoToast(`💳 自動偵測新扣款：${topTx.normalized_merchant} -$${topTx.effective_amount}`);
+          }
         } else if (newIncome !== prevIncome) {
-          showAutoToast(`📅 薪資預算已自動同步更新為 $${newIncome.toLocaleString()}`);
+          showAutoToast(`🏦 本月可用預算已更新為 $${newIncome.toLocaleString()}`);
         }
       }
     } catch (_) {}
@@ -862,7 +923,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.addEventListener('focus', () => {
     checkClipboardForBankNotification();
-    autoSyncShiftFromBridge(null, false);
   });
 
   $$('[data-nav-tab]').forEach(btn => {
@@ -873,14 +933,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     btn.addEventListener('click', () => switchRecordSubtab(btn.dataset.recordSubtab));
   });
 
+  const setTxFilterAndRender = filterKey => {
+    currentTxFilter = filterKey;
+    $$('#txFilterBar [data-tx-filter]').forEach(btn => {
+      const on = btn.dataset.txFilter === currentTxFilter;
+      btn.className = `btn-press shrink-0 px-3.5 py-2 rounded-full text-xs ${on ? 'font-semibold bg-[#0A84FF] text-white' : 'font-medium bg-[#151821] border border-white/[0.08] text-[#8E95A5]'}`;
+    });
+    if (dashboardState) renderTransactionsList(dashboardState.transactions);
+  };
+
   $('#cardGoCooldown')?.addEventListener('click', () => {
     switchMainTab('records');
     switchRecordSubtab('cooldown');
   });
 
+  $('#cardGoDeposits')?.addEventListener('click', () => {
+    switchMainTab('records');
+    switchRecordSubtab('transactions');
+    setTxFilterAndRender('DEPOSIT');
+  });
+
   $('#cardGoTransactions')?.addEventListener('click', () => {
     switchMainTab('records');
     switchRecordSubtab('transactions');
+    setTxFilterAndRender('SPENT_ALL');
   });
 
   const openImpulse = () => {
@@ -932,7 +1008,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const res = await apiCall('/api/notifications/parse', 'POST', { text });
       const box = $('#notifResultBox');
       box.classList.remove('hidden');
-      box.className = 'rounded-2xl p-3.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold';
+      box.className = 'rounded-xl p-4 text-xs bg-emerald-500/12 border border-emerald-500/25 text-emerald-300 font-medium';
       box.textContent = `【${res.result.resultType}】${res.result.message}`;
       $('#notifInput').value = '';
       renderDashboard(res.dashboard);
@@ -947,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentTxFilter = b.dataset.txFilter;
     $$('#txFilterBar [data-tx-filter]').forEach(btn => {
       const on = btn.dataset.txFilter === currentTxFilter;
-      btn.className = `btn-press shrink-0 px-3 py-1.5 rounded-full text-xs ${on ? 'font-semibold bg-slate-900 text-white' : 'font-medium bg-white border border-slate-200 text-slate-600'}`;
+      btn.className = `btn-press shrink-0 px-3.5 py-2 rounded-full text-xs ${on ? 'font-semibold bg-[#0A84FF] text-white' : 'font-medium bg-[#151821] border border-white/[0.08] text-[#8E95A5]'}`;
     });
     if (dashboardState) renderTransactionsList(dashboardState.transactions);
   });
@@ -1043,8 +1119,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const tankQuick = e.target.closest('[data-tank-quick]');
     if (tankQuick) {
       const [tankType, deltaAmount, note] = tankQuick.dataset.tankQuick.split('|');
-      const res = await apiCall('/api/wallet-tank/adjust', 'POST', { tankType, deltaAmount: Number(deltaAmount), note });
+      const dAmt = Number(deltaAmount) || 0;
+      const res = await apiCall('/api/wallet-tank/adjust', 'POST', { tankType, deltaAmount: dAmt, note });
       renderDashboard(res.dashboard);
+      const label = tankType === 'EASYCARD' ? '💳 悠遊卡' : '💵 皮包現金';
+      const bal = tankType === 'EASYCARD' ? res.walletTank?.easycardBalance : res.walletTank?.cashBalance;
+      showAutoToast(
+        dAmt >= 0
+          ? `${label}已加值 +$${Math.abs(dAmt).toLocaleString()}（目前餘額 $${Number(bal || 0).toLocaleString()}）`
+          : `${label}已扣款 -$${Math.abs(dAmt).toLocaleString()}（目前餘額 $${Number(bal || 0).toLocaleString()}）`
+      );
       return;
     }
 
@@ -1052,6 +1136,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (settleSplit) {
       const res = await apiCall('/api/split-bills/settle', 'POST', { splitBillId: Number(settleSplit.dataset.settleSplit) });
       renderDashboard(res.dashboard);
+      return;
+    }
+
+    const delTx = e.target.closest('[data-del-tx]');
+    if (delTx) {
+      const res = await apiCall('/api/transactions/delete', 'POST', { txId: Number(delTx.dataset.delTx) });
+      renderDashboard(res.dashboard);
+      showAutoToast('🗑️ 已刪除該筆紀錄並同步更新餘額！');
+      return;
     }
   });
 
@@ -1060,7 +1153,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       selectedImpulseType = btn.dataset.impType;
       $$('[data-imp-type]').forEach(b => {
         const on = b.dataset.impType === selectedImpulseType;
-        b.className = `imp-type-btn btn-press py-2.5 rounded-2xl text-xs font-semibold ${on ? (selectedImpulseType === 'WANT' ? 'bg-rose-600 text-white shadow-xs' : 'bg-emerald-600 text-white shadow-xs') : 'bg-slate-100 text-slate-500'}`;
+        b.className = `imp-type-btn btn-press py-3 rounded-xl text-xs ${on ? 'font-semibold bg-[#0A84FF] text-white shadow-sm' : 'font-medium bg-[#232836] text-[#8E95A5] border border-white/[0.08]'}`;
       });
     });
   });
@@ -1080,17 +1173,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       const out = $('#impulseEvalOutput');
       out.classList.remove('hidden');
       out.innerHTML = `
-        <div class="flex flex-wrap gap-1.5">
-          <span class="px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-semibold">⏱️ 需站班表 ${esc(ev.sweatWork.hours)}h ${esc(ev.sweatWork.minutes)}m</span>
-          <span class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold">☕ 約 ${coffeeCups} 杯咖啡</span>
-          <span class="px-2.5 py-1 rounded-full bg-slate-200/70 text-slate-700 text-xs font-semibold">📉 日預算 $${ev.survivalImpact.dailyBudgetBefore} ➔ $${ev.survivalImpact.dailyBudgetAfter}</span>
+        <div class="flex flex-wrap gap-2">
+          <span class="px-3 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/25 text-xs font-medium">⏱️ 需站班表 ${esc(ev.sweatWork.hours)}h ${esc(ev.sweatWork.minutes)}m</span>
+          <span class="px-3 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25 text-xs font-medium">☕ 約 ${coffeeCups} 杯咖啡</span>
+          <span class="px-3 py-1 rounded-full bg-white/[0.06] text-[#D1D5DB] text-xs font-medium">📉 日預算 $${ev.survivalImpact.dailyBudgetBefore} ➔ $${ev.survivalImpact.dailyBudgetAfter}</span>
         </div>
-        <div class="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-white p-3.5 rounded-2xl border border-slate-100">${esc(ev.aiRoastMessage)}</div>
+        <div class="text-xs text-[#D1D5DB] whitespace-pre-line leading-relaxed bg-black/30 p-4 rounded-xl border border-white/[0.06]">${esc(ev.aiRoastMessage)}</div>
         <div class="flex items-center justify-between pt-1">
-          <span class="text-xs font-semibold ${ev.lockedIn72hPool ? 'text-amber-700' : 'text-emerald-700'}">
+          <span class="text-xs font-medium ${ev.lockedIn72hPool ? 'text-amber-300' : 'text-emerald-300'}">
             ${ev.lockedIn72hPool ? '🔒 已鎖入 72h 冷卻清單' : '✅ 評估完成'}
           </span>
-          <button type="button" id="btnViewCooldownNow" class="btn-press px-3 py-1.5 rounded-full bg-slate-900 text-white text-xs font-semibold">查看冷卻清單</button>
+          <button type="button" id="btnViewCooldownNow" class="btn-press btn-primary px-4 py-2 rounded-full text-xs">查看冷卻清單</button>
         </div>
       `;
       $('#impItemName').value = '';
@@ -1127,16 +1220,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   const handleCustomTankDelta = async (tankType, inputSel) => {
     const inputEl = $(inputSel);
     if (!inputEl) return;
-    const rawStr = inputEl.value.trim();
-    if (rawStr === '') return;
-    const num = Math.round(Number(rawStr));
-    if (!Number.isFinite(num) || num === 0) return;
-    // 在卡片內「自訂扣款」欄：輸入負數 (-45) 或正數 (45) 預設皆為扣款；若明確輸入 +200 則為加值
-    const deltaAmount = rawStr.startsWith('+') ? Math.abs(num) : -Math.abs(num);
+    const cleaned = String(inputEl.value || '')
+      .trim()
+      .replace(/[＋]/g, '+')
+      .replace(/[－﹣—–]/g, '-')
+      .replace(/[$,，\s元]/g, '');
+    if (!cleaned) return;
+    const isNegative = cleaned.startsWith('-');
+    const numPart = cleaned.replace(/^[+-]+/, '');
+    const num = Math.round(Number(numPart));
+    if (!numPart || !Number.isFinite(num) || num === 0) return;
+
+    // 輸入正數 (60) 或明確加號 (+60) 皆為加值存入；輸入負數 (-60) 則為扣款消費
+    const deltaAmount = isNegative ? -Math.abs(num) : Math.abs(num);
     const note = deltaAmount < 0 ? '自訂金額扣款' : '自訂金額加值';
     const res = await apiCall('/api/wallet-tank/adjust', 'POST', { tankType, deltaAmount, note });
     inputEl.value = '';
     renderDashboard(res.dashboard);
+    const label = tankType === 'EASYCARD' ? '💳 悠遊卡' : '💵 皮包現金';
+    const bal = tankType === 'EASYCARD' ? res.walletTank?.easycardBalance : res.walletTank?.cashBalance;
+    showAutoToast(
+      deltaAmount >= 0
+        ? `${label}已加值 +$${Math.abs(deltaAmount).toLocaleString()}（目前餘額 $${Number(bal || 0).toLocaleString()}）`
+        : `${label}已扣款 -$${Math.abs(deltaAmount).toLocaleString()}（目前餘額 $${Number(bal || 0).toLocaleString()}）`
+    );
   };
 
   $('#btnCustomEasyAdjust')?.addEventListener('click', () => handleCustomTankDelta('EASYCARD', '#customEasyDeltaInput'));
@@ -1159,6 +1266,67 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('#auditEasyInput').value = '';
     $('#auditCashInput').value = '';
     renderDashboard(res.dashboard);
+  });
+
+  // ✍️ 首頁直接登記「使用現金消費」
+  const handleQuickRecordCashExpense = async () => {
+    const itemName = ($('#cashExpenseNameInput')?.value || '').trim() || '現金消費';
+    const rawAmt = ($('#cashExpenseAmountInput')?.value || '').trim();
+    const amount = Math.round(Number(rawAmt));
+    const category = $('#cashExpenseCategorySelect')?.value || '餐飲外食';
+    const countInBudget = Boolean($('#chkCashCountInBudget')?.checked);
+
+    if (!rawAmt || !Number.isFinite(amount) || amount <= 0) {
+      return alert('請輸入大於 0 的現金消費金額！');
+    }
+    try {
+      const res = await apiCall('/api/cash/spend', 'POST', {
+        itemName,
+        amount,
+        category,
+        countInBudget
+      });
+      if ($('#cashExpenseNameInput')) $('#cashExpenseNameInput').value = '';
+      if ($('#cashExpenseAmountInput')) $('#cashExpenseAmountInput').value = '';
+      renderDashboard(res.dashboard);
+      showAutoToast(`💵 已登記現金消費：${itemName} -$${amount.toLocaleString()}（皮包餘 $${res.walletTank?.cashBalance ?? 0}）`);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  $('#btnQuickRecordCashExpense')?.addEventListener('click', handleQuickRecordCashExpense);
+  $('#cashExpenseAmountInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleQuickRecordCashExpense();
+  });
+
+  // 🏧 首頁直接登記「往金融卡存錢 (ATM 存款)」
+  const handleQuickAtmDeposit = async () => {
+    const rawAmt = ($('#quickAtmDepositInput')?.value || '').trim();
+    const amount = Math.round(Number(rawAmt));
+    const deductFromWalletCash = Boolean($('#chkAtmDeductCash')?.checked);
+
+    if (!rawAmt || !Number.isFinite(amount) || amount <= 0) {
+      return alert('請輸入存入金融卡的金額！');
+    }
+    try {
+      const res = await apiCall('/api/deposits/add', 'POST', {
+        amount,
+        merchant: '玉山 ATM 存款',
+        category: 'ATM存款',
+        deductFromWalletCash
+      });
+      if ($('#quickAtmDepositInput')) $('#quickAtmDepositInput').value = '';
+      renderDashboard(res.dashboard);
+      showAutoToast(`🏧 已存入金融卡 +$${amount.toLocaleString()}！本月可用預算與存款紀錄已同步更新`);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  $('#btnQuickAtmDeposit')?.addEventListener('click', handleQuickAtmDeposit);
+  $('#quickAtmDepositInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleQuickAtmDeposit();
   });
 
   // ⏳ 薪資班表 ↔ 現實發薪時間對照模式切換與目前預算設定
@@ -1309,7 +1477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const box = $('#notifResultBox');
       if (box) {
         box.classList.remove('hidden');
-        box.className = 'rounded-2xl p-3.5 text-xs bg-indigo-50 border border-indigo-200 text-indigo-800 font-semibold';
+        box.className = 'rounded-xl p-4 text-xs bg-[#0A84FF]/15 border border-[#0A84FF]/30 text-sky-300 font-medium';
         box.textContent = res.imap.message;
       }
       showAutoToast(res.imap.message);
@@ -1358,7 +1526,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const box = $('#notifResultBox');
       if (box) {
         box.classList.remove('hidden');
-        box.className = 'rounded-2xl p-3.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold';
+        box.className = 'rounded-xl p-4 text-xs bg-emerald-500/12 border border-emerald-500/25 text-emerald-300 font-medium';
         box.textContent = res.imap.message;
       }
       showAutoToast(res.imap.message);
@@ -1391,7 +1559,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const box = $('#notifResultBox');
       if (box) {
         box.classList.remove('hidden');
-        box.className = 'rounded-2xl p-3.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold';
+        box.className = 'rounded-xl p-4 text-xs bg-emerald-500/12 border border-emerald-500/25 text-emerald-300 font-medium';
         box.textContent = `🍎【Apple Pay 自動入帳成功】${res.result.message}`;
       }
       renderDashboard(res.dashboard);

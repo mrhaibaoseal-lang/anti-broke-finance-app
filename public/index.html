@@ -1,312 +1,455 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#F8FAFC" />
+  <meta name="theme-color" content="#090A0F" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="防破產記帳" />
   <link rel="manifest" href="/manifest.json" />
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261021v10" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261022v15" />
 </head>
-<body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
+<body class="min-h-screen selection:bg-[#0A84FF]/30 selection:text-white">
 
-  <div id="highRiskBanner" class="hidden max-w-md mx-auto bg-rose-50 border-b border-rose-200 px-4 py-2 text-center text-xs font-semibold text-rose-700"></div>
+  <!-- 高風險防禦頂部提示列 -->
+  <div id="highRiskBanner" class="hidden bg-rose-500/15 border-b border-rose-500/25 px-4 py-2.5 text-center text-xs font-medium text-rose-300 backdrop-blur-md"></div>
 
-  <header class="sticky top-0 z-30 bg-[#F8FAFC]/85 backdrop-blur-md border-b border-slate-200/60">
-    <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
-      <div class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-2xl bg-slate-900 text-white grid place-items-center text-sm shadow-sm">
+  <!-- ==================== 頂部導覽列 (Apple Frosted Glass Header) ==================== -->
+  <header class="sticky top-0 z-30 bg-[#090A0F]/80 backdrop-blur-xl border-b border-white/[0.08]">
+    <div class="max-w-2xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-10 h-10 rounded-xl bg-[#0A84FF]/15 border border-[#0A84FF]/30 text-[#0A84FF] grid place-items-center text-base shrink-0 shadow-sm">
           <i class="fa-solid fa-shield-heart"></i>
         </div>
-        <div>
-          <h1 class="text-base font-bold tracking-tight text-slate-900 leading-tight">防破產記帳</h1>
-          <p class="text-[11px] text-slate-400 tabular-nums">週期 <span id="cycleDateLabel">--</span></p>
+        <div class="min-w-0">
+          <h1 class="text-base sm:text-lg font-semibold tracking-tight text-[#F5F5F7] truncate">防破產記帳</h1>
+          <p class="text-xs text-[#8E95A5] tabular-nums">預算週期 <span id="cycleDateLabel">--</span></p>
         </div>
       </div>
 
-      <div class="flex items-center gap-1.5">
-        <button id="btnToggleHighRisk" class="btn-press px-2.5 py-1.5 rounded-full bg-white border border-slate-200/80 text-slate-600 text-xs font-medium flex items-center gap-1 shadow-sm">
-          <i class="fa-solid fa-moon text-rose-500"></i>
+      <div class="flex items-center gap-2 shrink-0">
+        <button id="btnToggleHighRisk" class="btn-press btn-secondary px-3.5 py-2 rounded-full text-xs flex items-center gap-2">
+          <i class="fa-solid fa-moon text-rose-400"></i>
           <span id="highRiskBtnLabel">夜間防禦</span>
         </button>
-        <button id="btnOpenShiftSync" class="btn-press px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-700 text-xs font-semibold flex items-center gap-1 shadow-sm">
-          <i class="fa-solid fa-sack-dollar"></i> 薪資
+        <button id="btnOpenShiftSync" class="btn-press btn-primary px-4 py-2 rounded-full text-xs flex items-center gap-2">
+          <i class="fa-solid fa-building-columns"></i>
+          <span>存錢 / 預算</span>
         </button>
       </div>
     </div>
   </header>
 
-  <main class="max-w-md mx-auto px-4 pt-4 pb-28 space-y-4">
-    <div id="alertStack" class="space-y-2"></div>
+  <!-- ==================== 主內容容器 (8px 倍數間距系統) ==================== -->
+  <main class="max-w-2xl mx-auto px-4 sm:px-6 pt-6 pb-32 space-y-6">
+    <div id="alertStack" class="space-y-3"></div>
 
     <!-- ==================== 分頁 1：【首頁 / 總覽】 ==================== -->
-    <section id="tab-home" class="tab-pane space-y-4">
-      <div id="survivalMainCard" class="bento-card p-6 space-y-5">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-xs font-medium text-slate-400">本月剩餘防剁手額度</span>
-          <span id="tierBadge" class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-            ✨ 初始待設定
+    <section id="tab-home" class="tab-pane space-y-6">
+
+      <!-- 1. 本月剩餘可用額度主卡片 (Apple Wallet Card 風格) -->
+      <div id="survivalMainCard" class="bento-card p-6 sm:p-8 space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span class="text-xs font-medium tracking-wide text-[#8E95A5]">本月剩餘可用額度（金融卡存款預算）</span>
+          <span id="tierBadge" class="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/12 text-emerald-300 border border-emerald-500/25">
+            🏧 等待存款或記帳
           </span>
         </div>
 
-        <div>
-          <div id="metricRemaining" class="text-4xl font-bold tracking-tight text-slate-900 tabular-nums">$0</div>
-          <div class="mt-3 flex flex-wrap items-center gap-2">
-            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold tabular-nums">
-              <i class="fa-solid fa-coins text-amber-500"></i> 今日可用 <b id="dailySafeAmount" class="text-slate-900">$0</b>
+        <div class="space-y-4">
+          <div id="metricRemaining" class="text-4xl sm:text-5xl font-bold tracking-tight text-[#F5F5F7] tabular-nums leading-none">$0</div>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[#D1D5DB] text-xs font-medium tabular-nums">
+              <i class="fa-solid fa-coins text-amber-400"></i>
+              <span>今日可用</span>
+              <b id="dailySafeAmount" class="text-[#F5F5F7] font-semibold">$0</b>
             </span>
-            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-medium tabular-nums">
-              <i class="fa-regular fa-calendar text-indigo-500"></i> 距發薪 <b id="daysRemainingVal" class="text-slate-800">--</b> 天 (<span id="paydayDayVal">10</span>號)
+            <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[#8E95A5] text-xs font-medium tabular-nums">
+              <i class="fa-regular fa-calendar text-[#0A84FF]"></i>
+              <span>距結算 <b id="daysRemainingVal" class="text-[#F5F5F7] font-semibold">--</b> 天 (<span id="paydayDayVal">10</span>號)</span>
             </span>
           </div>
         </div>
 
-        <div id="tierAdviceText" class="text-xs text-slate-500 bg-slate-50 rounded-2xl px-3.5 py-2.5 border border-slate-100 leading-relaxed"></div>
+        <div class="grid grid-cols-3 divide-x divide-white/[0.07] text-center apple-inset !p-4">
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">金融卡已存</div>
+            <div id="metricIncome" class="text-base font-semibold text-emerald-400 tabular-nums">$0</div>
+          </div>
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">固定扣款</div>
+            <div id="metricFixed" class="text-base font-semibold text-amber-400 tabular-nums">-$0</div>
+          </div>
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">今日已花</div>
+            <div id="todaySpentVal" class="text-base font-semibold text-[#F5F5F7] tabular-nums">$0</div>
+          </div>
+        </div>
+
+        <div id="tierAdviceText" class="text-xs text-[#8E95A5] apple-inset !py-3.5 !px-4 leading-relaxed"></div>
       </div>
 
-      <button id="btnOpenImpulseModal" class="btn-press w-full p-5 rounded-3xl bg-slate-900 hover:bg-slate-800 text-white shadow-md flex items-center justify-between">
-        <div class="flex items-center gap-3.5">
-          <div class="w-11 h-11 rounded-2xl bg-rose-500/20 text-rose-400 grid place-items-center text-lg">
-            <i class="fa-solid fa-fire-extinguisher"></i>
+      <!-- 2. 現金 ＆ 悠遊卡水庫與日常記帳中心 (Apple Settings 分組卡片) -->
+      <div class="bento-card p-6 sm:p-8 space-y-6">
+        <!-- 卡片標題區 -->
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <span class="w-10 h-10 rounded-xl bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/25 grid place-items-center text-base shrink-0">
+              <i class="fa-solid fa-wallet"></i>
+            </span>
+            <div>
+              <h2 class="text-lg font-semibold text-[#F5F5F7] tracking-tight">現金 ＆ 悠遊卡即時控制</h2>
+              <p class="text-xs text-[#8E95A5]">領現花用直接登記 · 去 ATM 存進金融卡一鍵轉入</p>
+            </div>
           </div>
-          <div class="text-left">
-            <div class="text-base font-semibold tracking-tight">➕ 我又想買東西了</div>
-            <div class="text-xs text-slate-400">衝動急救 · 工時換算 · 72h 冷卻鎖</div>
-          </div>
+          <span class="px-3 py-1 rounded-full bg-white/[0.06] text-[#8E95A5] text-xs font-medium border border-white/[0.08] shrink-0">首頁快控</span>
         </div>
-        <div class="w-8 h-8 rounded-full bg-white/10 grid place-items-center text-xs text-white/80">
-          <i class="fa-solid fa-chevron-right"></i>
-        </div>
-      </button>
 
-      <div class="grid grid-cols-2 gap-4">
-        <button type="button" id="cardGoCooldown" class="bento-card p-5 text-left space-y-2.5 btn-press">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-400">成功忍住省下</span>
-            <span class="w-6 h-6 rounded-full bg-emerald-50 text-emerald-600 grid place-items-center text-xs">
-              <i class="fa-solid fa-piggy-bank"></i>
+        <div id="tankAuditBanner" class="hidden rounded-xl bg-amber-500/12 border border-amber-500/25 p-4 text-xs font-medium text-amber-300"></div>
+
+        <!-- 分組 A：雙水庫餘額與快調 (響應式雙欄) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- 皮包現金子卡 -->
+          <div class="apple-inset space-y-4 flex flex-col justify-between">
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm font-semibold text-[#F5F5F7] flex items-center gap-2">
+                  <i class="fa-solid fa-money-bill-1-wave text-emerald-400"></i> 皮包現金
+                </span>
+                <span class="text-xs text-[#8E95A5]">手頭現鈔</span>
+              </div>
+              <div id="tankCashVal" class="text-3xl font-bold text-[#F5F5F7] tabular-nums tracking-tight">$0</div>
+              <div id="tankCashLastNote" class="text-xs text-[#8E95A5] truncate">可輸入 60、+60 加值或 -60 扣款</div>
+            </div>
+
+            <div class="space-y-3 pt-1">
+              <div class="grid grid-cols-4 gap-2">
+                <button data-tank-quick="CASH|-50|現金小吃" class="btn-press btn-ghost py-2 text-xs tabular-nums">-$50</button>
+                <button data-tank-quick="CASH|-100|現金便當" class="btn-press btn-ghost py-2 text-xs tabular-nums">-$100</button>
+                <button data-tank-quick="CASH|-200|現金採買" class="btn-press btn-ghost py-2 text-xs tabular-nums">-$200</button>
+                <button data-tank-quick="CASH|1000|領現金入袋" class="btn-press btn-ghost py-2 text-xs text-emerald-300 border-emerald-500/25 tabular-nums">+$1000</button>
+              </div>
+              <div class="flex items-center gap-2">
+                <input id="customCashDeltaInput" type="text" inputmode="text" class="input-fintech w-full !py-2 !px-3 text-xs" placeholder="自訂 60、+500 或 -65" />
+                <button type="button" id="btnCustomCashAdjust" class="btn-press btn-secondary shrink-0 px-4 py-2 text-xs">調整</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 悠遊卡子卡 -->
+          <div class="apple-inset space-y-4 flex flex-col justify-between">
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm font-semibold text-[#F5F5F7] flex items-center gap-2">
+                  <i class="fa-solid fa-credit-card text-[#0A84FF]"></i> 悠遊卡
+                </span>
+                <span class="text-xs text-[#8E95A5]">自動加值水庫</span>
+              </div>
+              <div id="tankEasycardVal" class="text-3xl font-bold text-[#F5F5F7] tabular-nums tracking-tight">$0</div>
+              <div id="tankEasyLastNote" class="text-xs text-[#8E95A5] truncate">可輸入 60、+60 加值或 -60 扣款</div>
+            </div>
+
+            <div class="space-y-3 pt-1">
+              <div class="grid grid-cols-4 gap-2">
+                <button data-tank-quick="EASYCARD|-35|悠遊卡飲料" class="btn-press btn-ghost py-2 text-xs tabular-nums">-$35</button>
+                <button data-tank-quick="EASYCARD|-50|悠遊卡銅板" class="btn-press btn-ghost py-2 text-xs tabular-nums">-$50</button>
+                <button data-tank-quick="EASYCARD|-100|悠遊卡餐費" class="btn-press btn-ghost py-2 text-xs tabular-nums">-$100</button>
+                <button data-tank-quick="EASYCARD|500|手動加值悠遊卡" class="btn-press btn-ghost py-2 text-xs text-sky-300 border-sky-500/25 tabular-nums">+$500</button>
+              </div>
+              <div class="flex items-center gap-2">
+                <input id="customEasyDeltaInput" type="text" inputmode="text" class="input-fintech w-full !py-2 !px-3 text-xs" placeholder="自訂 60、+200 或 -45" />
+                <button type="button" id="btnCustomEasyAdjust" class="btn-press btn-secondary shrink-0 px-4 py-2 text-xs">調整</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <hr class="apple-divider" />
+
+        <!-- 分組 B：使用現金消費・直接登記明細 -->
+        <div class="apple-inset space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-[15px] font-semibold text-[#F5F5F7] flex items-center gap-2">
+              <i class="fa-solid fa-pen-to-square text-[#0A84FF]"></i>
+              <span>使用現金消費・直接登記明細</span>
+            </h3>
+            <span class="text-xs text-[#8E95A5]">自動扣皮包現金＋入帳紀錄</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+            <input id="cashExpenseNameInput" type="text" class="input-fintech sm:col-span-5" placeholder="品項（例：便當、手搖）" />
+            <input id="cashExpenseAmountInput" type="number" min="1" class="input-fintech sm:col-span-4 font-semibold tabular-nums" placeholder="金額 $" />
+            <select id="cashExpenseCategorySelect" class="input-fintech sm:col-span-3">
+              <option value="餐飲外食">🍱 餐飲</option>
+              <option value="手搖飲品">🧋 飲料</option>
+              <option value="超商小額">🏪 超商</option>
+              <option value="日常採買">🛍️ 採買</option>
+              <option value="加油交通">🛵 交通</option>
+              <option value="一般消費">🧾 其他</option>
+            </select>
+          </div>
+
+          <label class="flex items-center gap-2.5 text-xs text-[#D1D5DB] cursor-pointer select-none">
+            <input id="chkCashCountInBudget" type="checkbox" class="w-4 h-4 accent-[#0A84FF] rounded" />
+            <span>同步扣減「金融卡防剁手額度」（未勾選則僅扣皮包現金）</span>
+          </label>
+
+          <button type="button" id="btnQuickRecordCashExpense" class="btn-press btn-primary w-full py-3 text-sm flex items-center justify-center gap-2">
+            <i class="fa-solid fa-check"></i>
+            <span>登記這筆現金消費（寫入扣款紀錄）</span>
+          </button>
+        </div>
+
+        <!-- 分組 C：往金融卡存錢 (ATM 存款入帳) -->
+        <div class="apple-inset space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-[15px] font-semibold text-[#F5F5F7] flex items-center gap-2">
+              <i class="fa-solid fa-building-columns text-emerald-400"></i>
+              <span>往金融卡存錢（ATM 存款入帳）</span>
+            </h3>
+            <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium border border-emerald-500/25">支援通知自動抓</span>
+          </div>
+
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <input id="quickAtmDepositInput" type="number" min="1" class="input-fintech flex-1 font-semibold tabular-nums" placeholder="輸入存入金融卡的金額 $" />
+            <button type="button" id="btnQuickAtmDeposit" class="btn-press btn-primary shrink-0 px-5 py-3 text-sm flex items-center justify-center gap-2">
+              <i class="fa-solid fa-arrow-up-from-bracket"></i>
+              <span>存入金融卡</span>
+            </button>
+          </div>
+
+          <label class="flex items-center gap-2.5 text-xs text-[#D1D5DB] cursor-pointer select-none">
+            <input id="chkAtmDeductCash" type="checkbox" checked class="w-4 h-4 accent-[#0A84FF] rounded" />
+            <span>同步從上方「皮包現金」扣除這筆拿去 ATM 存的錢</span>
+          </label>
+        </div>
+
+        <!-- 分組 D：盤點設定與水庫明細摺疊區 -->
+        <details class="group apple-inset !p-0 overflow-hidden">
+          <summary class="cursor-pointer px-4 py-3.5 flex items-center justify-between text-xs font-medium text-[#D1D5DB] hover:text-white transition-colors">
+            <span class="flex items-center gap-2">
+              <i class="fa-solid fa-sliders text-[#8E95A5]"></i>
+              <span>盤點設定現金 / 悠遊卡總餘額 ＆ 水庫明細紀錄</span>
+            </span>
+            <i class="fa-solid fa-chevron-down text-xs text-[#8E95A5] group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <div class="px-4 pb-4 pt-2 border-t border-white/[0.06] space-y-4">
+            <p class="text-xs text-[#8E95A5] leading-relaxed">
+              輸入<b class="text-[#F5F5F7]">正數</b>（如 <code class="text-emerald-300">1500</code>）可直接設定目前總餘額；輸入<b class="text-[#F5F5F7]">負數</b>（如 <code class="text-rose-300">-80</code>）則從目前餘額扣減：
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input id="auditCashInput" type="text" inputmode="text" class="input-fintech text-xs" placeholder="設定皮包現金總額 $" />
+              <input id="auditEasyInput" type="text" inputmode="text" class="input-fintech text-xs" placeholder="設定悠遊卡總額 $" />
+            </div>
+            <button id="btnAuditTank" class="btn-press btn-secondary w-full py-2.5 text-xs">
+              確認更新現金 / 悠遊卡餘額
+            </button>
+            <div id="tankLogsList" class="space-y-2 max-h-44 overflow-y-auto pt-1"></div>
+          </div>
+        </details>
+      </div>
+
+      <!-- 3. 金融卡存款紀錄 & 扣款與消費紀錄 雙欄概覽卡 -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <button type="button" id="cardGoDeposits" class="bento-card p-6 text-left space-y-4 btn-press flex flex-col justify-between">
+          <div class="flex items-center justify-between w-full">
+            <span class="text-sm font-semibold text-[#D1D5DB]">金融卡存款紀錄</span>
+            <span class="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-400 grid place-items-center text-xs">
+              <i class="fa-solid fa-arrow-trend-up"></i>
             </span>
           </div>
-          <div id="savedTotalVal" class="text-3xl font-bold tracking-tight text-emerald-600 tabular-nums">$0</div>
-          <div class="flex flex-wrap gap-1">
-            <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-medium tabular-nums">
-              ⏱️ 少站 <span id="savedHoursVal">0</span>h
+          <div id="cardDepositedTotalVal" class="text-3xl font-bold tracking-tight text-emerald-400 tabular-nums">+$0</div>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            <span class="px-2.5 py-1 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium tabular-nums border border-emerald-500/20">
+              🏧 存入 <span id="depositCountBadge">0</span> 筆
             </span>
-            <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-medium tabular-nums">
-              <span id="savedCountVal">0</span> 件
+            <span class="px-2.5 py-1 rounded-full bg-white/[0.06] text-[#8E95A5] text-xs font-medium">
+              點此看明細 →
             </span>
           </div>
         </button>
 
-        <button type="button" id="cardGoTransactions" class="bento-card p-5 text-left space-y-2.5 btn-press">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-400">本月已花費</span>
-            <span class="w-6 h-6 rounded-full bg-rose-50 text-rose-600 grid place-items-center text-xs">
+        <button type="button" id="cardGoTransactions" class="bento-card p-6 text-left space-y-4 btn-press flex flex-col justify-between">
+          <div class="flex items-center justify-between w-full">
+            <span class="text-sm font-semibold text-[#D1D5DB]">扣款與消費紀錄</span>
+            <span class="w-8 h-8 rounded-full bg-rose-500/15 text-rose-400 grid place-items-center text-xs">
               <i class="fa-solid fa-receipt"></i>
             </span>
           </div>
-          <div id="metricSpent" class="text-3xl font-bold tracking-tight text-slate-900 tabular-nums">$0</div>
-          <div class="flex flex-wrap gap-1">
-            <span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[11px] font-medium tabular-nums">
-              🟡 圈存 <span id="pendingSpentVal">$0</span>
+          <div id="metricSpent" class="text-3xl font-bold tracking-tight text-[#F5F5F7] tabular-nums">$0</div>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            <span class="px-2.5 py-1 rounded-full bg-amber-500/12 text-amber-300 text-xs font-medium tabular-nums border border-amber-500/20">
+              圈存 <span id="pendingSpentVal">$0</span>
             </span>
-            <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-medium tabular-nums">
-              🟢 <span id="settledSpentVal">$0</span>
+            <span class="px-2.5 py-1 rounded-full bg-white/[0.06] text-[#D1D5DB] text-xs font-medium tabular-nums">
+              已扣 <span id="settledSpentVal">$0</span>
+            </span>
+            <span class="px-2.5 py-1 rounded-full bg-[#0A84FF]/15 text-sky-300 text-xs font-medium tabular-nums border border-[#0A84FF]/25">
+              現金 <span id="cashSpentVal">$0</span>
             </span>
           </div>
         </button>
       </div>
 
-      <!-- ⚡ 新增：首頁全自動刷卡偵測 & 排班薪資自動連動中心卡片 -->
-      <div class="bento-card p-5 space-y-3.5 border border-indigo-100 bg-gradient-to-br from-white via-indigo-50/30 to-emerald-50/30">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span class="text-xs font-bold text-slate-900">全自動刷卡偵測 ＆ 薪資 App 即時連動</span>
+      <!-- 4. 防剁手急救入口 & 忍住省下統計 -->
+      <div class="grid grid-cols-1 sm:grid-cols-12 gap-4">
+        <button id="btnOpenImpulseModal" class="sm:col-span-8 bento-card p-6 btn-press flex items-center justify-between gap-4 border-[#0A84FF]/30 bg-gradient-to-r from-[#151821] to-[#172236]">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-[#0A84FF] text-white grid place-items-center text-lg shrink-0 shadow-md shadow-[#0A84FF]/25">
+              <i class="fa-solid fa-fire-extinguisher"></i>
+            </div>
+            <div class="text-left space-y-1">
+              <div class="text-base font-semibold text-[#F5F5F7] tracking-tight">➕ 我又想買東西了</div>
+              <div class="text-xs text-[#8E95A5]">啟動血汗工時換算 · 72 小時冷卻鎖</div>
+            </div>
           </div>
-          <span class="px-2 py-0.5 rounded-full bg-emerald-100/80 text-emerald-800 text-[10px] font-bold">免手動輸入</span>
-        </div>
+          <div class="w-8 h-8 rounded-full bg-white/[0.08] grid place-items-center text-xs text-[#D1D5DB] shrink-0">
+            <i class="fa-solid fa-chevron-right"></i>
+          </div>
+        </button>
 
-        <div class="grid grid-cols-2 gap-2.5">
-          <button type="button" id="btnHomeOpenShiftEmbed" class="btn-press rounded-2xl bg-emerald-600 text-white p-3 text-left space-y-1 shadow-xs">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold"><i class="fa-solid fa-calendar-days mr-1"></i>開啟排班算薪水</span>
-              <span class="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-md">自動同步</span>
-            </div>
-            <div class="text-[11px] text-emerald-100 leading-tight">排班變動即自動重算預算，免貼 JSON</div>
-          </button>
-
-          <button type="button" id="btnHomeAutoSwipeCenter" class="btn-press rounded-2xl bg-indigo-600 text-white p-3 text-left space-y-1 shadow-xs">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold"><i class="fa-brands fa-apple mr-1"></i>Apple Pay / 刷卡偵測</span>
-              <span class="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-md">秒級入帳</span>
-            </div>
-            <div class="text-[11px] text-indigo-100 leading-tight">Apple Pay 感應、推播與 Gmail 全自動扣款</div>
-          </button>
-        </div>
-
-        <div class="grid grid-cols-3 gap-2 pt-0.5">
-          <button id="btnOpenNotifModal" class="btn-press py-2 px-2.5 rounded-xl bg-white border border-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1">
-            <i class="fa-solid fa-bolt text-indigo-600"></i> 自動化設定
-          </button>
-          <button id="btnOpenShiftSyncHome" class="btn-press py-2 px-2.5 rounded-xl bg-white border border-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1">
-            <i class="fa-solid fa-rotate text-emerald-600"></i> 薪資連動設定
-          </button>
-          <button id="btnOpenBalanceSync" class="btn-press py-2 px-2.5 rounded-xl bg-white border border-slate-200/80 text-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1">
-            <i class="fa-solid fa-scale-balanced text-amber-600"></i> 餘額校正
-          </button>
-        </div>
+        <button type="button" id="cardGoCooldown" class="sm:col-span-4 bento-card p-6 text-left flex flex-col justify-between gap-2 btn-press">
+          <div class="text-xs font-medium text-[#8E95A5] flex items-center justify-between w-full">
+            <span>忍住省下</span>
+            <i class="fa-solid fa-piggy-bank text-emerald-400"></i>
+          </div>
+          <div id="savedTotalVal" class="text-2xl font-bold text-emerald-400 tabular-nums">$0</div>
+          <div class="text-xs text-[#8E95A5] tabular-nums">少站 <span id="savedHoursVal">0</span>h (<span id="savedCountVal">0</span>件)</div>
+        </button>
       </div>
 
-      <!-- ⏳ 新增：薪資班表 ↔ 現實發薪時間對照中心卡片 -->
-      <div id="timeMappingCard" class="bento-card p-5 space-y-3.5 border border-emerald-100 bg-white">
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <span class="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 grid place-items-center text-xs">
-              <i class="fa-solid fa-clock-rotate-left"></i>
-            </span>
-            <div>
-              <div class="text-xs font-bold text-slate-900">⏳ 薪資班表 ↔ 現實發薪時間對照</div>
-              <div id="tmTodayMeta" class="text-[11px] text-slate-400 tabular-nums">現實時間 -- · 每月 10 號發薪</div>
-            </div>
+      <!-- 5. 玉山「ATM 存款 ＋ 刷卡扣款」全自動偵測與對帳工具卡 -->
+      <div class="bento-card p-6 sm:p-8 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <h2 class="text-base font-semibold text-[#F5F5F7]">玉山「ATM 存款 ＋ 刷卡扣款」全自動偵測</h2>
           </div>
-          <button type="button" id="btnToggleMappingMode" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold">
-            🕒 次月發薪制
+          <span class="px-2.5 py-1 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium border border-emerald-500/20">存款 / 扣款雙向支援</span>
+        </div>
+
+        <p class="text-xs text-[#8E95A5] leading-relaxed">
+          不論是去 ATM 把現金存進金融卡的「存款通知」，或是 Apple Pay / 簽帳卡刷卡的「圈存與請款扣款通知」，系統都能自動辨識並分別寫入存款與扣款紀錄。
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          <button id="btnOpenNotifModal" class="btn-press btn-primary py-3 px-4 text-xs flex items-center justify-center gap-2">
+            <i class="fa-solid fa-bolt"></i>
+            <span>通知偵測 / 模擬</span>
           </button>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2.5">
-          <!-- 左欄：現在正在花的錢 (本週期) -->
-          <div class="rounded-2xl bg-slate-50 border border-slate-200/80 p-3 space-y-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">🟢 現在能花的錢</span>
-              <span id="tmCurrentCycleRange" class="text-[10px] text-slate-400 tabular-nums">--~--</span>
-            </div>
-            <div id="tmCurrentSourceTitle" class="text-[11px] font-semibold text-slate-700 truncate">對應上月班表 / 已領薪水</div>
-            <div id="tmCurrentIncomeVal" class="text-xl font-extrabold text-slate-900 tabular-nums">$0</div>
-            <div id="tmCurrentSubMeta" class="text-[10px] text-slate-500 leading-tight">上月排班 0 天 (0h)</div>
-          </div>
-
-          <!-- 右欄：這個月上班累積、下個月才領的錢 (下週期) -->
-          <div class="rounded-2xl bg-indigo-50/60 border border-indigo-200/80 p-3 space-y-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">🔮 下個月才領的錢</span>
-              <span id="tmNextCountdownBadge" class="text-[10px] font-bold text-indigo-600 tabular-nums">倒數 -- 天</span>
-            </div>
-            <div id="tmUpcomingSourceTitle" class="text-[11px] font-semibold text-indigo-950 truncate">本月班表 ➔ 下月發薪</div>
-            <div id="tmUpcomingNetVal" class="text-xl font-extrabold text-indigo-700 tabular-nums">$0</div>
-            <div id="tmUpcomingSubMeta" class="text-[10px] text-indigo-900/75 leading-tight">本月已排 0 天 · 下月可用 $0/天</div>
-          </div>
-        </div>
-
-        <div class="rounded-2xl bg-amber-50/70 border border-amber-200/70 p-3 space-y-2">
-          <div id="tmExplainText" class="text-[11px] text-amber-900 leading-relaxed">
-            💡 你現在打開班表 App 登記的是「<b>這個月上班的天數</b>」，薪水會在<b>下個月發薪日</b>才入帳！現在這個月要花的預算請設定在下方（不會影響下月班表累積）：
-          </div>
-          <div class="flex items-center gap-1.5">
-            <input id="quickCurrentSalaryInput" type="number" min="0" class="input-fintech flex-1 !py-1.5 !px-3 !rounded-xl text-xs font-bold" placeholder="輸入現在(本月)手頭實際可花預算 $" />
-            <button type="button" id="btnSetQuickCurrentSalary" class="btn-press shrink-0 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-semibold">
-              設定目前預算
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="bento-card p-5">
-        <div class="grid grid-cols-3 divide-x divide-slate-100 text-center">
-          <div class="px-2">
-            <div class="text-xs text-slate-400">本月薪資預算</div>
-            <div id="metricIncome" class="text-base font-bold text-emerald-600 tabular-nums mt-1">$0</div>
-          </div>
-          <div class="px-2">
-            <div class="text-xs text-slate-400">固定扣款/分期</div>
-            <div id="metricFixed" class="text-base font-bold text-amber-600 tabular-nums mt-1">-$0</div>
-          </div>
-          <div class="px-2">
-            <div class="text-xs text-slate-400">今日已花費</div>
-            <div id="todaySpentVal" class="text-base font-bold text-slate-900 tabular-nums mt-1">$0</div>
-          </div>
+          <button id="btnOpenBalanceSync" class="btn-press btn-secondary py-3 px-4 text-xs flex items-center justify-center gap-2">
+            <i class="fa-solid fa-scale-balanced text-amber-400"></i>
+            <span>餘額校正</span>
+          </button>
+          <button id="btnOpenShiftSyncHome" class="btn-press btn-secondary py-3 px-4 text-xs flex items-center justify-center gap-2">
+            <i class="fa-solid fa-sack-dollar text-emerald-400"></i>
+            <span>領現 / 預算設定</span>
+          </button>
         </div>
       </div>
     </section>
 
-    <!-- ==================== 分頁 2：【冷卻清單 / 紀錄】 ==================== -->
-    <section id="tab-records" class="tab-pane hidden space-y-4">
-      <div class="bg-slate-200/70 p-1 rounded-2xl grid grid-cols-2 gap-1">
-        <button type="button" data-record-subtab="cooldown" class="record-subtab-btn btn-press py-2 rounded-xl text-xs font-semibold bg-white text-slate-900 shadow-sm">
+    <!-- ==================== 分頁 2：【扣款與存款紀錄 / 冷卻清單】 ==================== -->
+    <section id="tab-records" class="tab-pane hidden space-y-6">
+      <!-- Apple Segmented Control -->
+      <div class="bg-[#151821] p-1.5 rounded-2xl border border-white/[0.08] grid grid-cols-2 gap-1.5">
+        <button type="button" data-record-subtab="transactions" class="record-subtab-btn btn-press py-2.5 rounded-xl text-xs font-semibold bg-[#252A38] text-[#F5F5F7] shadow-sm">
+          🧾 扣款與存款紀錄
+        </button>
+        <button type="button" data-record-subtab="cooldown" class="record-subtab-btn btn-press py-2.5 rounded-xl text-xs font-medium text-[#8E95A5]">
           🔥 72h 冷卻清單
         </button>
-        <button type="button" data-record-subtab="transactions" class="record-subtab-btn btn-press py-2 rounded-xl text-xs font-semibold text-slate-500">
-          🧾 銀行對帳紀錄
-        </button>
       </div>
 
-      <div id="subtab-cooldown" class="space-y-3">
+      <!-- 子分頁：72h 冷卻清單 -->
+      <div id="subtab-cooldown" class="hidden space-y-4">
         <div class="flex items-center justify-between px-1">
-          <span id="achieveBadgeTitle" class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60">🌱 防衝動覺醒者</span>
-          <button id="btnOpenImpulseFromList" class="btn-press px-3 py-1.5 rounded-full bg-slate-900 text-white text-xs font-semibold flex items-center gap-1">
-            <i class="fa-solid fa-plus"></i> 新增想買
+          <span id="achieveBadgeTitle" class="text-xs font-medium text-emerald-300 bg-emerald-500/12 px-3 py-1.5 rounded-full border border-emerald-500/25">🌱 防衝動覺醒者</span>
+          <button id="btnOpenImpulseFromList" class="btn-press btn-primary px-4 py-2 rounded-full text-xs flex items-center gap-1.5">
+            <i class="fa-solid fa-plus"></i>
+            <span>新增想買</span>
           </button>
         </div>
-        <div id="cooldownListContainer" class="space-y-3"></div>
+        <div id="cooldownListContainer" class="space-y-4"></div>
       </div>
 
-      <div id="subtab-transactions" class="hidden space-y-3">
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex overflow-x-auto no-scrollbar gap-1.5 py-0.5" id="txFilterBar">
-            <button data-tx-filter="ALL" class="btn-press shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900 text-white">全部</button>
-            <button data-tx-filter="PENDING" class="btn-press shrink-0 px-3 py-1.5 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-600">🟡 圈存中</button>
-            <button data-tx-filter="SETTLED" class="btn-press shrink-0 px-3 py-1.5 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-600">🟢 已結算</button>
-            <button data-tx-filter="TEMP_HOLD" class="btn-press shrink-0 px-3 py-1.5 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-600">⛽ 預授權</button>
-            <button data-tx-filter="CANCELED" class="btn-press shrink-0 px-3 py-1.5 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-600">❄️ 退單</button>
-            <button data-tx-filter="UNKNOWN_GAP" class="btn-press shrink-0 px-3 py-1.5 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-600">🕳️ 黑洞</button>
+      <!-- 子分頁：扣款與存款紀錄 -->
+      <div id="subtab-transactions" class="space-y-4">
+        <div class="bento-card p-6 grid grid-cols-3 divide-x divide-white/[0.07] text-center">
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">金融卡存款</div>
+            <div id="txSummaryDeposited" class="text-base font-bold text-emerald-400 tabular-nums">+$0</div>
           </div>
-          <button id="btnOpenNotifFromList" class="btn-press shrink-0 px-3 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-semibold">
-            ⚡ 自動偵測
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">刷卡扣款</div>
+            <div id="txSummaryCardSpent" class="text-base font-bold text-rose-400 tabular-nums">-$0</div>
+          </div>
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">現金消費</div>
+            <div id="txSummaryCashSpent" class="text-base font-bold text-sky-400 tabular-nums">-$0</div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex overflow-x-auto no-scrollbar gap-2 py-1" id="txFilterBar">
+            <button data-tx-filter="ALL" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-semibold bg-[#0A84FF] text-white">全部</button>
+            <button data-tx-filter="DEPOSIT" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#D1D5DB]">💰 存款紀錄</button>
+            <button data-tx-filter="SPENT_ALL" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#D1D5DB]">💸 扣款紀錄</button>
+            <button data-tx-filter="CASH_SPENT" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#D1D5DB]">💵 現金消費</button>
+            <button data-tx-filter="PENDING" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#8E95A5]">🟡 圈存中</button>
+            <button data-tx-filter="SETTLED" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#8E95A5]">🟢 已結算</button>
+            <button data-tx-filter="TEMP_HOLD" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#8E95A5]">⛽ 預授權</button>
+            <button data-tx-filter="CANCELED" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#8E95A5]">❄️ 退單</button>
+            <button data-tx-filter="UNKNOWN_GAP" class="btn-press shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-[#151821] border border-white/[0.08] text-[#8E95A5]">🕳️ 黑洞</button>
+          </div>
+          <button id="btnOpenNotifFromList" class="btn-press btn-primary shrink-0 px-4 py-2 rounded-full text-xs">
+            ⚡ 貼上通知
           </button>
         </div>
-        <div id="txListContainer" class="space-y-3"></div>
+
+        <div id="txListContainer" class="space-y-4"></div>
       </div>
     </section>
 
-    <!-- ==================== 分頁 3：【設定與分析】 ==================== -->
-    <section id="tab-analytics" class="tab-pane hidden space-y-4">
-      <!-- 1. 薪資、時薪與生存週期設定 -->
-      <div class="bento-card p-5 space-y-4">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 grid place-items-center text-sm">
-              <i class="fa-solid fa-sack-dollar"></i>
+    <!-- ==================== 分頁 3：【設定與分析】 (Apple Settings 風格) ==================== -->
+    <section id="tab-analytics" class="tab-pane hidden space-y-6">
+
+      <!-- 1. 金融卡存款預算 ＆ 領現核對 -->
+      <div class="bento-card p-6 sm:p-8 space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <span class="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 grid place-items-center text-base shrink-0">
+              <i class="fa-solid fa-building-columns"></i>
             </span>
             <div>
-              <h2 class="text-base font-semibold text-slate-900">薪資 App 自動連動與週期</h2>
-              <p id="actualSalaryNote" class="text-xs text-slate-400">與打工薪水帳 V2 自動同步</p>
+              <h2 class="text-lg font-semibold text-[#F5F5F7]">金融卡存款預算 ＆ 領現核對</h2>
+              <p id="actualSalaryNote" class="text-xs text-[#8E95A5]">以 ATM 實際存入金融卡金額為預算核心</p>
             </div>
           </div>
-          <button id="btnOpenShiftSyncCard" class="btn-press px-3 py-1.5 rounded-full bg-emerald-600 text-white text-xs font-semibold">
-            📅 排班連動
+          <button id="btnOpenShiftSyncCard" class="btn-press btn-secondary px-4 py-2 rounded-full text-xs">
+            💼 領現對帳 / 設定
           </button>
         </div>
 
-        <div class="grid grid-cols-3 gap-2 text-center bg-slate-50 rounded-2xl p-3 border border-slate-100">
-          <div>
-            <div class="text-[11px] text-slate-400">目前時薪</div>
-            <div id="shiftWageVal" class="text-sm font-bold text-slate-900 tabular-nums mt-0.5">$200</div>
+        <div class="grid grid-cols-3 divide-x divide-white/[0.07] text-center apple-inset !p-4">
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">目前時薪</div>
+            <div id="shiftWageVal" class="text-base font-semibold text-[#F5F5F7] tabular-nums">$200</div>
           </div>
-          <div>
-            <div class="text-[11px] text-slate-400">班表總額</div>
-            <div id="shiftGrossVal" class="text-sm font-bold text-slate-900 tabular-nums mt-0.5">$0</div>
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">班表總額</div>
+            <div id="shiftGrossVal" class="text-base font-semibold text-[#F5F5F7] tabular-nums">$0</div>
           </div>
-          <div>
-            <div class="text-[11px] text-slate-400">可用實領</div>
-            <div id="shiftNetVal" class="text-sm font-bold text-emerald-600 tabular-nums mt-0.5">$0</div>
+          <div class="px-2 space-y-1">
+            <div class="text-xs text-[#8E95A5]">可用實領</div>
+            <div id="shiftNetVal" class="text-base font-semibold text-emerald-400 tabular-nums">$0</div>
           </div>
         </div>
+
         <div class="hidden">
           <span id="shiftHoursVal">0</span>
           <span id="netFactorVal">×0.95</span>
@@ -314,165 +457,113 @@
           <span id="gapSpentVal">$0</span>
         </div>
 
-        <div class="grid grid-cols-3 gap-2.5 text-xs">
-          <div>
-            <label class="text-slate-400 block mb-1">每月發薪日</label>
-            <input id="setPayday" type="number" min="1" max="28" class="input-fintech w-full font-semibold" value="10" />
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+          <div class="space-y-1.5">
+            <label for="setPayday" class="text-[#8E95A5] block font-medium">每月發薪日</label>
+            <input id="setPayday" type="number" min="1" max="28" class="input-fintech w-full font-semibold tabular-nums" value="10" />
           </div>
-          <div>
-            <label class="text-slate-400 block mb-1">實領折數</label>
-            <input id="setNetFactor" type="number" step="0.01" min="0.5" max="1" class="input-fintech w-full font-semibold" value="0.95" />
+          <div class="space-y-1.5">
+            <label for="setNetFactor" class="text-[#8E95A5] block font-medium">實領折數</label>
+            <input id="setNetFactor" type="number" step="0.01" min="0.5" max="1" class="input-fintech w-full font-semibold tabular-nums" value="0.95" />
           </div>
-          <div>
-            <label class="text-slate-400 block mb-1">勞健保自付</label>
-            <input id="setLaborDeduct" type="number" min="0" class="input-fintech w-full font-semibold" value="0" />
+          <div class="space-y-1.5">
+            <label for="setLaborDeduct" class="text-[#8E95A5] block font-medium">勞健保自付</label>
+            <input id="setLaborDeduct" type="number" min="0" class="input-fintech w-full font-semibold tabular-nums" value="0" />
           </div>
         </div>
-        <button id="btnSaveSettings" class="btn-press w-full py-2.5 rounded-2xl bg-slate-900 text-white font-semibold text-xs">
+
+        <button id="btnSaveSettings" class="btn-press btn-primary w-full py-3 text-sm">
           儲存週期設定
         </button>
       </div>
 
       <!-- 2. 固定扣款 & 未來 3 個月薪水分期壓條 -->
-      <div class="bento-card p-5 space-y-4">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 grid place-items-center text-sm">
+      <div class="bento-card p-6 sm:p-8 space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <span class="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/25 grid place-items-center text-base shrink-0">
               <i class="fa-solid fa-chart-simple"></i>
             </span>
             <div>
-              <h2 class="text-base font-semibold text-slate-900">固定扣款與分期壓條</h2>
-              <p class="text-xs text-slate-400">未來 3 個月薪水預支比例</p>
+              <h2 class="text-lg font-semibold text-[#F5F5F7]">固定扣款與分期壓條</h2>
+              <p class="text-xs text-[#8E95A5]">未來 3 個月薪水預支比例</p>
             </div>
           </div>
-          <button id="btnOpenFixedModal" class="btn-press px-3 py-1.5 rounded-full bg-slate-900 text-white text-xs font-semibold">
+          <button id="btnOpenFixedModal" class="btn-press btn-primary px-4 py-2 rounded-full text-xs">
             + 新增扣款
           </button>
         </div>
 
-        <div id="subAlertsWrap" class="space-y-2"></div>
-        <div id="futureSalaryBars" class="space-y-2.5"></div>
-        <div id="fixedExpenseList" class="space-y-2 pt-1"></div>
+        <div id="subAlertsWrap" class="space-y-3"></div>
+        <div id="futureSalaryBars" class="space-y-3"></div>
+        <div id="fixedExpenseList" class="space-y-3 pt-1"></div>
       </div>
 
-      <!-- 3. 悠遊卡・現金水庫 & 聚餐代墊池 -->
-      <div class="bento-card p-5 space-y-4">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 grid place-items-center text-sm">
-              <i class="fa-solid fa-wallet"></i>
+      <!-- 3. 朋友聚餐拆帳・應收代墊款池 -->
+      <div class="bento-card p-6 sm:p-8 space-y-5">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <span class="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 grid place-items-center text-base shrink-0">
+              <i class="fa-solid fa-handshake"></i>
             </span>
             <div>
-              <h2 class="text-base font-semibold text-slate-900">悠遊卡・現金水庫</h2>
-              <p class="text-xs text-slate-400">追蹤自動加值與領現花費</p>
+              <h2 class="text-lg font-semibold text-[#F5F5F7]">朋友代墊應收池</h2>
+              <p class="text-xs text-[#8E95A5]">聚餐刷卡拆帳 · 代墊不扣個人預算</p>
             </div>
           </div>
+          <span id="receivableTotalVal" class="text-xl font-bold text-emerald-400 tabular-nums">$0</span>
         </div>
-
-        <div id="tankAuditBanner" class="hidden rounded-2xl bg-amber-50 border border-amber-200 p-3 text-xs font-semibold text-amber-800"></div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3.5 space-y-2">
-            <div class="text-xs text-slate-400">💳 悠遊卡餘額</div>
-            <div id="tankEasycardVal" class="text-2xl font-bold text-slate-900 tabular-nums">$0</div>
-            <div class="flex flex-wrap gap-1">
-              <button data-tank-quick="EASYCARD|-35|飲料" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$35</button>
-              <button data-tank-quick="EASYCARD|-50|銅板" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$50</button>
-              <button data-tank-quick="EASYCARD|-100|餐費" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$100</button>
-            </div>
-            <div class="flex items-center gap-1 pt-1">
-              <input id="customEasyDeltaInput" type="number" class="input-fintech w-full !py-1.5 !px-2.5 !rounded-xl text-xs" placeholder="自訂如 -45" />
-              <button type="button" id="btnCustomEasyAdjust" class="btn-press shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-900 text-white text-[11px] font-semibold">扣款</button>
-            </div>
-          </div>
-
-          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3.5 space-y-2">
-            <div class="text-xs text-slate-400">💵 皮包現金</div>
-            <div id="tankCashVal" class="text-2xl font-bold text-slate-900 tabular-nums">$0</div>
-            <div class="flex flex-wrap gap-1">
-              <button data-tank-quick="CASH|-50|小吃" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$50</button>
-              <button data-tank-quick="CASH|-100|便當" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$100</button>
-              <button data-tank-quick="CASH|-200|採買" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$200</button>
-            </div>
-            <div class="flex items-center gap-1 pt-1">
-              <input id="customCashDeltaInput" type="number" class="input-fintech w-full !py-1.5 !px-2.5 !rounded-xl text-xs" placeholder="自訂如 -65" />
-              <button type="button" id="btnCustomCashAdjust" class="btn-press shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-900 text-white text-[11px] font-semibold">扣款</button>
-            </div>
-          </div>
-        </div>
-
-        <details open class="group rounded-2xl bg-slate-50 border border-slate-100 p-3">
-          <summary class="cursor-pointer list-none flex items-center justify-between text-xs font-semibold text-slate-700">
-            <span>📋 盤點設定水庫餘額 / 自訂增減與紀錄</span>
-            <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-open:rotate-180 transition-transform"></i>
-          </summary>
-          <div class="mt-3 space-y-2.5">
-            <div class="text-[11px] text-slate-500 leading-relaxed">
-              💡 輸入<b>正數</b>（如 <code class="text-slate-700 font-semibold">500</code>）可設定目前總餘額；輸入<b>負數</b>（如 <code class="text-rose-600 font-semibold">-80</code>）會自動從目前餘額扣減，不會歸零！
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <input id="auditEasyInput" type="number" class="input-fintech text-xs" placeholder="悠遊卡餘額 或 -扣款 $" />
-              <input id="auditCashInput" type="number" class="input-fintech text-xs" placeholder="現金餘額 或 -扣款 $" />
-            </div>
-            <button id="btnAuditTank" class="btn-press w-full py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs">
-              確認更新 / 扣減水庫餘額
-            </button>
-            <div id="tankLogsList" class="space-y-1 max-h-36 overflow-y-auto pt-1"></div>
-          </div>
-        </details>
-
-        <div class="pt-2 border-t border-slate-100 space-y-2.5">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-700">🤝 朋友代墊應收池</span>
-            <span id="receivableTotalVal" class="text-sm font-bold text-emerald-600 tabular-nums">$0</span>
-          </div>
-          <div id="splitBillsList" class="space-y-2"></div>
-        </div>
+        <div id="splitBillsList" class="space-y-3"></div>
       </div>
 
       <!-- 4. 隱形吸血鬼抓漏雷達 -->
-      <div class="bento-card p-5 space-y-3">
-        <div class="flex items-center gap-2">
-          <span class="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 grid place-items-center text-sm">
+      <div class="bento-card p-6 sm:p-8 space-y-5">
+        <div class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-400 border border-rose-500/25 grid place-items-center text-base shrink-0">
             <i class="fa-solid fa-bolt"></i>
           </span>
           <div>
-            <h2 class="text-base font-semibold text-slate-900">小額高頻抓漏雷達</h2>
-            <p class="text-xs text-slate-400">7 天內單筆 &lt; $200 消費排行</p>
+            <h2 class="text-lg font-semibold text-[#F5F5F7]">小額高頻抓漏雷達</h2>
+            <p class="text-xs text-[#8E95A5]">7 天內單筆 &lt; $200 消費排行</p>
           </div>
         </div>
-        <div id="vampireAlertBanner" class="hidden rounded-2xl bg-rose-50 border border-rose-200 p-3 text-xs font-semibold text-rose-700"></div>
-        <div id="vampireLeaderboard" class="space-y-2"></div>
+        <div id="vampireAlertBanner" class="hidden rounded-xl bg-rose-500/12 border border-rose-500/25 p-4 text-xs font-medium text-rose-300"></div>
+        <div id="vampireLeaderboard" class="space-y-3"></div>
       </div>
 
       <!-- 5. 進階自動化與帳本重置 -->
-      <div class="bento-card p-5 space-y-3">
+      <div class="bento-card p-6 sm:p-8 space-y-5">
         <details class="group">
-          <summary class="cursor-pointer list-none flex items-center justify-between text-xs font-semibold text-slate-600">
-            <span>📲 iOS 捷徑 Webhook 與進階設定</span>
-            <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-open:rotate-180 transition-transform"></i>
+          <summary class="cursor-pointer flex items-center justify-between text-sm font-semibold text-[#D1D5DB] hover:text-white transition-colors">
+            <span class="flex items-center gap-2">
+              <i class="fa-solid fa-wand-magic-sparkles text-[#0A84FF]"></i>
+              <span>iOS 捷徑 Webhook 與進階設定</span>
+            </span>
+            <i class="fa-solid fa-chevron-down text-xs text-[#8E95A5] group-open:rotate-180 transition-transform"></i>
           </summary>
-          <div class="mt-3 space-y-3 text-xs">
-            <div class="rounded-2xl bg-slate-50 p-3 border border-slate-100 space-y-1">
-              <div class="font-semibold text-slate-700">Webhook URL</div>
-              <div id="webhookUrlDisplay" class="font-mono text-[11px] text-indigo-600 break-all select-all">POST /api/notifications/webhook</div>
+          <div class="mt-4 space-y-4 text-xs">
+            <div class="apple-inset space-y-1.5">
+              <div class="font-medium text-[#8E95A5]">Webhook URL</div>
+              <div id="webhookUrlDisplay" class="font-mono text-xs text-[#0A84FF] break-all select-all">POST /api/notifications/webhook</div>
             </div>
-            <div class="grid grid-cols-1 gap-2">
+            <div class="grid grid-cols-1 gap-3">
               <input id="setGmailUser" type="email" class="input-fintech text-xs" placeholder="Gmail 帳號 (選填)" />
-              <input id="setGmailPass" type="password" class="input-fintech text-xs" placeholder="16碼 Google 應用程式密碼" />
+              <input id="setGmailPass" type="password" class="input-fintech text-xs" placeholder="16 碼 Google 應用程式密碼" />
               <input id="setShiftPath" type="text" class="input-fintech text-xs font-mono hidden" value="" />
             </div>
-            <button id="btnPollGmail" class="btn-press w-full py-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-xs">
+            <button id="btnPollGmail" class="btn-press btn-secondary w-full py-2.5 text-xs">
               測試 Gmail 連線
             </button>
           </div>
         </details>
 
-        <div class="pt-3 border-t border-slate-100 flex gap-2">
-          <button id="btnResetDemo" class="btn-press flex-1 py-2.5 rounded-2xl bg-slate-100 text-slate-600 text-xs font-semibold">
+        <hr class="apple-divider" />
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button id="btnResetDemo" class="btn-press btn-secondary py-3 text-xs">
             載入範例資料
           </button>
-          <button id="btnClearAllData" class="btn-press flex-1 py-2.5 rounded-2xl bg-rose-50 text-rose-600 text-xs font-semibold">
+          <button id="btnClearAllData" class="btn-press btn-danger-soft py-3 text-xs">
             清空歸零帳本
           </button>
         </div>
@@ -480,169 +571,175 @@
     </section>
   </main>
 
-  <!-- ==================== 底部導覽列 (Bottom Tab Bar) ==================== -->
-  <nav class="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-xl border-t border-slate-200/70">
-    <div class="max-w-md mx-auto px-6 py-2 grid grid-cols-3 gap-2">
-      <button type="button" data-nav-tab="home" class="nav-tab-btn btn-press py-1.5 rounded-2xl flex flex-col items-center gap-1 text-slate-900 font-semibold">
+  <!-- ==================== 底部導覽列 (Apple Frosted Glass Tab Bar) ==================== -->
+  <nav class="fixed bottom-0 inset-x-0 z-40 bg-[#12151E]/85 backdrop-blur-2xl border-t border-white/[0.08]">
+    <div class="max-w-2xl mx-auto px-6 py-2 grid grid-cols-3 gap-3">
+      <button type="button" data-nav-tab="home" class="nav-tab-btn btn-press py-2 rounded-xl flex flex-col items-center gap-1 text-[#0A84FF] font-semibold">
         <i class="fa-solid fa-house text-base"></i>
-        <span class="text-[11px]">首頁總覽</span>
+        <span class="text-xs">首頁總覽</span>
       </button>
-      <button type="button" data-nav-tab="records" class="nav-tab-btn btn-press py-1.5 rounded-2xl flex flex-col items-center gap-1 text-slate-400 font-medium">
+      <button type="button" data-nav-tab="records" class="nav-tab-btn btn-press py-2 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
         <i class="fa-solid fa-hourglass-half text-base"></i>
-        <span class="text-[11px]">冷卻與紀錄</span>
+        <span class="text-xs">冷卻與紀錄</span>
       </button>
-      <button type="button" data-nav-tab="analytics" class="nav-tab-btn btn-press py-1.5 rounded-2xl flex flex-col items-center gap-1 text-slate-400 font-medium">
+      <button type="button" data-nav-tab="analytics" class="nav-tab-btn btn-press py-2 rounded-xl flex flex-col items-center gap-1 text-[#8E95A5] font-medium">
         <i class="fa-solid fa-sliders text-base"></i>
-        <span class="text-[11px]">設定與分析</span>
+        <span class="text-xs">設定與分析</span>
       </button>
     </div>
   </nav>
 
   <!-- ==================== 彈窗 1：衝動急救 / 靈魂拷問 Bottom Sheet ==================== -->
-  <div id="modalImpulse" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 rounded-2xl bg-rose-50 text-rose-600 grid place-items-center text-base">
+  <div id="modalImpulse" class="fixed inset-0 z-50 hidden bg-black/65 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="sheet-panel w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-400 border border-rose-500/25 grid place-items-center text-base shrink-0">
             <i class="fa-solid fa-fire-extinguisher"></i>
           </div>
           <div>
-            <h3 class="text-base font-bold text-slate-900">衝動急救 · 靈魂拷問</h3>
-            <p class="text-xs text-slate-400">換算血汗工時與 72 小時冷卻鎖</p>
+            <h3 class="text-lg font-semibold text-[#F5F5F7]">衝動急救 · 靈魂拷問</h3>
+            <p class="text-xs text-[#8E95A5]">換算血汗工時與 72 小時冷卻鎖</p>
           </div>
         </div>
-        <button data-close-modal="modalImpulse" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
+        <button data-close-modal="modalImpulse" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center">✕</button>
       </div>
 
-      <div class="space-y-3">
-        <div class="grid grid-cols-2 gap-2.5">
-          <div>
-            <label class="text-xs text-slate-400 block mb-1">想買什麼？</label>
+      <div class="space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="space-y-1.5">
+            <label for="impItemName" class="text-xs font-medium text-[#8E95A5] block">想買什麼？</label>
             <input id="impItemName" type="text" class="input-fintech w-full" placeholder="例：藍牙耳機" />
           </div>
-          <div>
-            <label class="text-xs text-slate-400 block mb-1">金額 (NT$)</label>
-            <input id="impAmount" type="number" class="input-fintech w-full font-semibold" placeholder="例：1500" />
+          <div class="space-y-1.5">
+            <label for="impAmount" class="text-xs font-medium text-[#8E95A5] block">金額 (NT$)</label>
+            <input id="impAmount" type="number" class="input-fintech w-full font-semibold tabular-nums" placeholder="例：1500" />
           </div>
         </div>
 
-        <div>
-          <label class="text-xs text-slate-400 block mb-1">想買的理由</label>
+        <div class="space-y-1.5">
+          <label for="impReason" class="text-xs font-medium text-[#8E95A5] block">想買的理由</label>
           <input id="impReason" type="text" class="input-fintech w-full" placeholder="例：限時特價、工作累想犒賞自己" />
         </div>
 
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" data-imp-type="WANT" class="imp-type-btn btn-press py-2.5 rounded-2xl text-xs font-semibold bg-rose-600 text-white shadow-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <button type="button" data-imp-type="WANT" class="imp-type-btn btn-press py-3 rounded-xl text-xs font-semibold bg-[#0A84FF] text-white shadow-sm">
             🔥 想要 · 鎖入 72h 冷卻
           </button>
-          <button type="button" data-imp-type="NEED" class="imp-type-btn btn-press py-2.5 rounded-2xl text-xs font-semibold bg-slate-100 text-slate-500">
+          <button type="button" data-imp-type="NEED" class="imp-type-btn btn-press py-3 rounded-xl text-xs font-medium bg-[#232836] text-[#8E95A5] border border-white/[0.08]">
             🍞 需要 · 生存必需品
           </button>
         </div>
 
-        <button id="btnEvaluateImpulse" class="btn-press w-full py-3.5 rounded-2xl bg-slate-900 text-white font-semibold text-sm shadow-sm">
+        <button id="btnEvaluateImpulse" class="btn-press btn-primary w-full py-3.5 text-sm">
           開始工時換算與靈魂拷問
         </button>
       </div>
 
-      <div id="impulseEvalOutput" class="hidden rounded-2xl bg-slate-50 border border-slate-200/80 p-4 space-y-3"></div>
+      <div id="impulseEvalOutput" class="hidden apple-inset space-y-4"></div>
     </div>
   </div>
 
   <!-- ==================== 彈窗 2：Apple Pay / 信用卡 / 簽帳卡 全自動刷卡偵測中心 Bottom Sheet ==================== -->
-  <div id="modalNotifParser" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between">
+  <div id="modalNotifParser" class="fixed inset-0 z-50 hidden bg-black/65 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="sheet-panel w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-start justify-between gap-3">
         <div>
-          <h3 class="text-base font-bold text-slate-900">🍎 Apple Pay・信用卡 全自動偵測</h3>
-          <p class="text-xs text-slate-400">感應即刻入帳 · 自動攔截銀行推播與信件 · 絕不重複扣款</p>
+          <h3 class="text-lg font-semibold text-[#F5F5F7]">🍎 Apple Pay・信用卡 全自動偵測</h3>
+          <p class="text-xs text-[#8E95A5] mt-0.5">感應即刻入帳 · 自動攔截銀行推播與信件 · 絕不重複扣款</p>
         </div>
-        <button data-close-modal="modalNotifParser" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
+        <button data-close-modal="modalNotifParser" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center shrink-0">✕</button>
       </div>
 
-      <div class="rounded-2xl bg-indigo-50/70 border border-indigo-200/80 p-3.5 space-y-3.5 text-xs">
-        <div class="flex items-center justify-between">
-          <span class="font-bold text-indigo-950 flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            三通道全開零死角（內建智慧防重 · 絕不重複扣款）
-          </span>
-          <span class="px-2 py-0.5 rounded-full bg-white text-emerald-700 font-bold text-[10px] border border-emerald-200">推薦 3 個全開</span>
-        </div>
-
-        <div class="rounded-xl bg-white/90 px-3 py-2 text-[11px] text-slate-600 border border-indigo-100 leading-relaxed">
-          🛡️ <b>為什麼三個都可以同時打開？</b><br/>
-          • <b>方式 A</b> 負責抓「<b>Apple Pay 感應</b>」（刷卡當下 1 秒入帳）<br/>
-          • <b>方式 B + C</b> 負責抓「<b>實體卡插卡、LINE Pay、街口、網購刷卡</b>」與「<b>銀行事後請款</b>」<br/>
-          • 系統內建<b>跨管道防重複扣款鎖</b>：同一筆消費就算同時被 A、B、C 抓到，也<b>只會扣款 1 次</b>！
-        </div>
-
-        <!-- ==================== 方式 A & B 合一：新版 iOS AI 捷徑「收到 App 通知自動轉發」 ==================== -->
-        <div class="bg-slate-900 text-white rounded-2xl p-3.5 space-y-2.5 shadow-sm">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-sm flex items-center gap-1.5">
-              <i class="fa-solid fa-bell text-amber-400"></i> iOS 捷徑 AI 一句話全自動偵測（玉山 + Apple Pay）
+      <!-- 通道說明與設定 -->
+      <div class="space-y-4 text-xs">
+        <div class="apple-inset space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="font-semibold text-[#F5F5F7] flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>三通道全開零死角（內建智慧防重）</span>
             </span>
-            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">實測可用</span>
+            <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 font-medium text-xs border border-emerald-500/25">推薦全開</span>
+          </div>
+          <div class="text-xs text-[#8E95A5] leading-relaxed space-y-1">
+            <div>• <b class="text-[#D1D5DB]">方式 A & B</b>：抓 Apple Pay 感應、實體卡、LINE Pay 與網購刷卡推播</div>
+            <div>• <b class="text-[#D1D5DB]">方式 C</b>：抓 Gmail 銀行通知信與事後請款</div>
+            <div>• 內建<b class="text-[#D1D5DB]">跨管道防重複扣款鎖</b>：同一筆消費同時被多管道抓到也只會扣款 1 次。</div>
+          </div>
+        </div>
+
+        <!-- 方式 A & B：iOS 捷徑 -->
+        <div class="apple-inset space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="font-semibold text-sm text-[#F5F5F7] flex items-center gap-2">
+              <i class="fa-solid fa-bell text-amber-400"></i>
+              <span>iOS 捷徑 AI 一句話全自動偵測</span>
+            </span>
+            <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-300 text-xs font-medium border border-emerald-500/25">實測可用</span>
           </div>
 
-          <div class="rounded-xl bg-white/10 p-2.5 space-y-1.5 text-[11px] text-slate-200 leading-relaxed border border-white/10">
-            <div><b>步驟 1</b>：打開 iPhone「<b>捷徑</b>」新增捷徑，在「<b>描述捷徑</b>」輸入框直接貼上下方這句提示詞：</div>
-            <div class="bg-black/40 rounded-lg p-2 font-mono text-[11px] text-amber-300 select-all">
+          <div class="space-y-2.5 text-xs text-[#D1D5DB] leading-relaxed">
+            <div><b>步驟 1</b>：打開 iPhone「捷徑」新增捷徑，在「描述捷徑」輸入框貼上下方提示詞：</div>
+            <div class="bg-black/40 border border-white/[0.08] rounded-xl p-3 font-mono text-xs text-amber-300 select-all break-all">
               當收到玉山銀行app時 發送給 https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook
             </div>
-            <div><b>步驟 2（把 Apple Pay / 玉山 Wallet 也加進同一個節點）</b>：<br/>
-              iOS 自動生成「<b>🔔 當我收到來自 [玉山銀行] [＋] 的通知時</b>」與「<b>取得 URL 內容 (POST JSON: body 內文 + title 標題)</b>」後，直接點「玉山銀行」右邊的 <b>[＋]</b>，把 <b>「錢包 (Apple Pay)」</b>、<b>「玉山 Wallet」</b>、<b>「LINE」</b> 一起勾起來，並確認「<b>自動化操作</b>」開關為綠色開啟即可！
+            <div class="text-[#8E95A5]">
+              <b class="text-[#D1D5DB]">步驟 2</b>：iOS 生成節點後，點「玉山銀行」右邊的 <b>[＋]</b>，把「錢包 (Apple Pay)」、「玉山 Wallet」、「LINE」一起勾選並開啟自動化即可。
             </div>
           </div>
 
-          <button type="button" id="btnCopyIosAiPrompt" class="btn-press w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs">
-            <i class="fa-solid fa-copy"></i> 📋 一鍵複製這句 iOS 捷徑提示詞
+          <button type="button" id="btnCopyIosAiPrompt" class="btn-press btn-primary w-full py-3 px-4 text-xs flex items-center justify-center gap-2">
+            <i class="fa-solid fa-copy"></i>
+            <span>一鍵複製 iOS 捷徑提示詞</span>
           </button>
 
-          <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="btnCopyWebhookUrl" class="btn-press py-2 px-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-semibold text-xs flex items-center justify-center gap-1">
-              📋 僅複製 Webhook 網址
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button type="button" id="btnCopyWebhookUrl" class="btn-press btn-secondary py-2.5 px-3 text-xs flex items-center justify-center gap-1.5">
+              <span>📋 僅複製 Webhook 網址</span>
             </button>
-            <button type="button" id="btnSimulateApplePay" class="btn-press py-2 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
-              ⚡ 模擬通知轉發測試
+            <button type="button" id="btnSimulateApplePay" class="btn-press btn-secondary py-2.5 px-3 text-xs text-emerald-300 flex items-center justify-center gap-1.5">
+              <span>⚡ 模擬通知轉發測試</span>
             </button>
           </div>
         </div>
 
-        <!-- ==================== 方式 C：Gmail 刷卡通知信全自動抓取 (支援直接綁定或雲端腳本) ==================== -->
-        <div class="bg-white rounded-2xl p-3.5 border border-emerald-200 space-y-2.5 shadow-xs">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-              <i class="fa-solid fa-envelope-circle-check text-emerald-600"></i> 方式 C：Gmail 刷卡通知信全自動抓取（免設捷徑！）
+        <!-- 方式 C：Gmail 刷卡通知信全自動抓取 -->
+        <div class="apple-inset space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="font-semibold text-sm text-[#F5F5F7] flex items-center gap-2">
+              <i class="fa-solid fa-envelope-circle-check text-emerald-400"></i>
+              <span>方式 C：Gmail 刷卡通知信全自動抓取</span>
             </span>
-            <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-semibold border border-emerald-200">最簡單免捷徑</span>
+            <span class="px-2.5 py-0.5 rounded-full bg-white/[0.06] text-[#D1D5DB] text-xs font-medium">免設捷徑</span>
           </div>
 
-          <div class="space-y-2">
-            <div class="text-[11px] text-slate-600 leading-relaxed">
-              直接輸入你收玉山/信用卡通知信的 <b>Gmail 信箱</b> 與 <b>Google 16 碼應用程式密碼</b>（可點 <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" class="text-emerald-600 underline font-semibold">這裡向 Google 取得 16 碼密碼</a>），系統每分鐘就會自動幫你收信入帳：
-            </div>
-            <div class="grid grid-cols-1 gap-2">
-              <input id="modalGmailUser" type="email" class="input-fintech text-xs" placeholder="輸入你的 Gmail 信箱 (例: xxx@gmail.com)" />
-              <input id="modalGmailPass" type="password" class="input-fintech text-xs" placeholder="輸入 Google 16 碼應用程式密碼" />
-            </div>
-            <button type="button" id="btnSaveAndPollGmailModal" class="btn-press w-full py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-xs shadow-xs">
-              ⚡ 儲存 Gmail 並立即啟動每分鐘全自動抓信
-            </button>
+          <p class="text-xs text-[#8E95A5] leading-relaxed">
+            輸入收玉山通知信的 Gmail 信箱與 <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" class="text-[#0A84FF] underline font-medium">Google 16 碼應用程式密碼</a>，系統每分鐘自動收信入帳：
+          </p>
+
+          <div class="grid grid-cols-1 gap-3">
+            <input id="modalGmailUser" type="email" class="input-fintech text-xs" placeholder="輸入你的 Gmail 信箱 (例: xxx@gmail.com)" />
+            <input id="modalGmailPass" type="password" class="input-fintech text-xs" placeholder="輸入 Google 16 碼應用程式密碼" />
           </div>
 
-          <details class="rounded-xl bg-emerald-50/60 p-2.5 text-[11px] text-slate-700 border border-emerald-200/70">
-            <summary class="cursor-pointer font-bold text-emerald-950">☁️ 進階選用：用 Google Apps Script 雲端 24h 轉發（點此展開 4 步驟）</summary>
-            <div class="mt-2 space-y-1.5 leading-relaxed">
-              <div><b>步驟 1</b>：點下方「<b>📋 1. 複製 24h 雲端腳本</b>」。</div>
-              <div><b>步驟 2</b>：點「<b>🌐 2. 開啟 Google 腳本頁</b>」➔ 點左上角「<b>＋ 新專案</b>」。</div>
-              <div><b>步驟 3</b>：把畫面原本的 `function myFunction() {}` 刪掉，<b>貼上腳本</b>，按上方「<b>💾 儲存</b>」。</div>
-              <div><b>步驟 4</b>：點左邊「<b>⏰ 觸發條件（鬧鐘圖示）</b>」➔ 右下角「<b>＋ 新增觸發條件</b>」➔ 活動來源選「<b>時間驅動</b>」➔「<b>分鐘計時器</b>」➔「<b>每分鐘</b>」➔ 儲存並允許授權！</div>
-              <div class="grid grid-cols-2 gap-2 pt-1">
-                <button type="button" id="btnCopyGasScript" class="btn-press py-2 px-2 rounded-xl bg-emerald-700 text-white font-bold text-xs">
+          <button type="button" id="btnSaveAndPollGmailModal" class="btn-press btn-primary w-full py-3 text-xs">
+            ⚡ 儲存 Gmail 並立即啟動每分鐘全自動抓信
+          </button>
+
+          <details class="rounded-xl bg-black/30 p-3.5 text-xs text-[#D1D5DB] border border-white/[0.06]">
+            <summary class="cursor-pointer font-medium text-[#8E95A5] hover:text-white flex items-center justify-between">
+              <span>☁️ 進階選用：用 Google Apps Script 雲端 24h 轉發</span>
+              <i class="fa-solid fa-chevron-down text-[10px]"></i>
+            </summary>
+            <div class="mt-3 space-y-2 leading-relaxed text-[#8E95A5]">
+              <div>1. 點下方「複製 24h 雲端腳本」。</div>
+              <div>2. 點「開啟 Google 腳本頁」➔ 左上角「＋ 新專案」。</div>
+              <div>3. 貼上腳本並儲存，於左側「⏰ 觸發條件」設為每分鐘執行。</div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                <button type="button" id="btnCopyGasScript" class="btn-press btn-secondary py-2.5 px-3 text-xs">
                   📋 1. 複製 24h 雲端腳本
                 </button>
-                <a href="https://script.google.com/home/start" target="_blank" rel="noopener" class="btn-press py-2 px-2 rounded-xl bg-slate-900 text-white font-bold text-xs text-center">
+                <a href="https://script.google.com/home/start" target="_blank" rel="noopener" class="btn-press btn-secondary py-2.5 px-3 text-xs text-center">
                   🌐 2. 開啟 Google 腳本頁
                 </a>
               </div>
@@ -650,159 +747,139 @@
           </details>
         </div>
 
-        <label class="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-indigo-100 cursor-pointer">
-          <div>
-            <div class="font-semibold text-slate-800">📋 附加防護：智慧剪貼簿自動感應</div>
-            <div class="text-[10px] text-slate-400">複製任何刷卡通知後切回畫面，免貼上自動辨識入帳</div>
+        <label class="flex items-center justify-between apple-inset cursor-pointer">
+          <div class="space-y-0.5 pr-3">
+            <div class="font-semibold text-xs text-[#F5F5F7]">📋 附加防護：智慧剪貼簿自動感應</div>
+            <div class="text-xs text-[#8E95A5]">複製任何刷卡通知後切回畫面，免貼上自動辨識入帳</div>
           </div>
-          <input id="chkAutoClipboard" type="checkbox" checked class="w-4 h-4 accent-indigo-600" />
+          <input id="chkAutoClipboard" type="checkbox" checked class="w-4 h-4 accent-[#0A84FF] shrink-0" />
         </label>
       </div>
 
-      <div id="notifResultBox" class="hidden rounded-2xl p-3.5 text-xs"></div>
+      <div id="notifResultBox" class="hidden rounded-xl p-4 text-xs"></div>
 
-      <details class="group rounded-2xl bg-slate-50 border border-slate-100 p-3">
-        <summary class="cursor-pointer list-none flex items-center justify-between text-xs font-semibold text-slate-600">
+      <!-- 模擬器摺疊區 -->
+      <details class="group apple-inset !p-0 overflow-hidden">
+        <summary class="cursor-pointer px-4 py-3.5 flex items-center justify-between text-xs font-semibold text-[#D1D5DB] hover:text-white">
           <span>🧪 刷卡通知自動對帳模擬器 / 單筆補登</span>
-          <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-open:rotate-180 transition-transform"></i>
+          <i class="fa-solid fa-chevron-down text-xs text-[#8E95A5] group-open:rotate-180 transition-transform"></i>
         </summary>
-        <div class="mt-2.5 space-y-2.5">
-          <div class="flex flex-wrap gap-1.5" id="presetButtonsWrap">
-            <button data-preset="apple_pay_tap" class="btn-press px-2.5 py-1 rounded-full bg-slate-900 text-white text-[11px] font-semibold">🍎 Apple Pay: 星巴克 $155</button>
-            <button data-preset="credit_ubear" class="btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-medium">💳 信用卡: U Bear 麥當勞 $165</button>
-            <button data-preset="maixiang_auth" class="btn-press px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium">🧃 A: 7-11 $10 圈存</button>
-            <button data-preset="maixiang_settle" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">✅ B: 超商 $10 請款</button>
-            <button data-preset="linepay_auth" class="btn-press px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium">💚 A: 連加*7-11 $85</button>
-            <button data-preset="linepay_settle" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">💚 B: 統一超商 $85 請款</button>
-            <button data-preset="steam_settle" class="btn-press px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-[11px] font-medium">🌍 B: Steam 請款 $1023</button>
-            <button data-preset="gas_settle" class="btn-press px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-[11px] font-medium">⛽ B: 中油請款 $135</button>
-            <button data-preset="verify_1ntd" class="btn-press px-2.5 py-1 rounded-full bg-purple-50 border border-purple-200 text-purple-800 text-[11px] font-medium">🪪 A: $1 綁卡驗證</button>
-            <button data-preset="easycard_topup" class="btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-medium">💧 A: 悠遊卡加值 $500</button>
-            <button data-preset="salary_in" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">💰 薪資入帳 $24,800</button>
+        <div class="px-4 pb-4 pt-2 border-t border-white/[0.06] space-y-4">
+          <div class="flex flex-wrap gap-2" id="presetButtonsWrap">
+            <button data-preset="atm_deposit" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs text-emerald-300 border-emerald-500/25">🏧 ATM 現金存入 +$5,000</button>
+            <button data-preset="cardless_deposit" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs text-emerald-300 border-emerald-500/25">🏧 無卡存款 +$3,000</button>
+            <button data-preset="apple_pay_tap" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs text-[#F5F5F7]">🍎 Apple Pay: 星巴克 $155</button>
+            <button data-preset="credit_ubear" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">💳 信用卡: U Bear 麥當勞 $165</button>
+            <button data-preset="maixiang_auth" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">🧃 A: 7-11 $10 圈存</button>
+            <button data-preset="maixiang_settle" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">✅ B: 超商 $10 請款</button>
+            <button data-preset="linepay_auth" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">💚 A: 連加*7-11 $85</button>
+            <button data-preset="linepay_settle" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">💚 B: 統一超商 $85 請款</button>
+            <button data-preset="steam_settle" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">🌍 B: Steam 請款 $1023</button>
+            <button data-preset="gas_settle" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">⛽ B: 中油請款 $135</button>
+            <button data-preset="verify_1ntd" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">🪪 A: $1 綁卡驗證</button>
+            <button data-preset="easycard_topup" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">💧 A: 悠遊卡加值 $500</button>
+            <button data-preset="salary_in" class="btn-press btn-ghost px-3 py-1.5 rounded-full text-xs">💰 薪資入帳 $24,800</button>
           </div>
-          <textarea id="notifInput" rows="3" class="input-fintech w-full text-xs" placeholder="點選上方模擬按鈕，或貼上單筆信用卡/玉山推播文字測試..."></textarea>
-          <button id="btnParseNotif" class="btn-press w-full py-3 rounded-2xl bg-indigo-600 text-white font-semibold text-xs shadow-sm">
-            模擬接收此筆刷卡通知並自動對帳
+          <textarea id="notifInput" rows="3" class="input-fintech w-full text-xs" placeholder="點選上方測試範本，或直接貼上玉山存款 / 扣款推播文字..."></textarea>
+          <button id="btnParseNotif" class="btn-press btn-primary w-full py-3 text-xs">
+            模擬接收此筆存款 / 扣款通知並自動入帳
           </button>
         </div>
       </details>
     </div>
   </div>
 
-  <!-- ==================== 彈窗 3：薪資 App 全自動連動與設定 Bottom Sheet ==================== -->
-  <div id="modalShiftSync" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between">
+  <!-- ==================== 彈窗 3：ATM 存款預算 & 領現薪資對帳小幫手 Bottom Sheet ==================== -->
+  <div id="modalShiftSync" class="fixed inset-0 z-50 hidden bg-black/65 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="sheet-panel w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-start justify-between gap-3">
         <div>
-          <h3 class="text-base font-bold text-slate-900">📅 薪資 App 全自動連動</h3>
-          <p class="text-xs text-slate-400">與「打工薪水帳 V2」即時雙向同步 · 免手動輸入 JSON</p>
+          <h3 class="text-lg font-semibold text-[#F5F5F7]">🏧 金融卡存款預算 ＆ 領現分流</h3>
+          <p class="text-xs text-[#8E95A5] mt-0.5">存多少算多少 · 班表僅供領現對帳不衝突</p>
         </div>
-        <button data-close-modal="modalShiftSync" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
+        <button data-close-modal="modalShiftSync" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center shrink-0">✕</button>
       </div>
 
-      <!-- 全自動排班 App 連動卡片 -->
-      <div class="rounded-2xl bg-emerald-50/80 border border-emerald-200 p-4 space-y-3">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            打工薪水帳 V2 自動橋接已啟動
-          </span>
-          <span id="shiftAutoSyncBadge" class="px-2 py-0.5 rounded-full bg-white text-emerald-700 font-semibold text-[10px] border border-emerald-200">免貼 JSON</span>
+      <div class="apple-inset space-y-3 text-xs">
+        <div class="font-semibold text-emerald-300 flex items-center gap-2">
+          <i class="fa-solid fa-circle-check"></i>
+          <span>「領現金 ➔ ATM 存金融卡」不衝突算錢法</span>
         </div>
-        <p class="text-[11px] text-emerald-800/90 leading-relaxed">
-          點擊下方按鈕直接開啟排班日曆（或上傳手寫班表照片），<b>任何排班、加班或時薪變動都會在背景 100% 自動同步回本記帳系統</b>，完全不需手動複製貼上 JSON！
-        </p>
-        <button type="button" id="btnOpenEmbeddedShiftApp" class="btn-press w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-sm flex items-center justify-center gap-2">
-          <i class="fa-solid fa-calendar-days"></i> 開啟「打工薪水帳 V2」排班表（即時自動同步）
-        </button>
-        <button type="button" id="btnAutoPullShiftNow" class="btn-press w-full py-2 rounded-xl bg-white border border-emerald-200 text-emerald-700 font-semibold text-xs">
-          🔄 立即從排班表重新抓取最新薪資
-        </button>
-      </div>
-
-      <!-- 📲 導入手機主畫面「打工薪水帳」現有資料（跨 App 沙盒橋接） -->
-      <div class="rounded-2xl bg-indigo-50/70 border border-indigo-200/80 p-4 space-y-2.5">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
-            <i class="fa-solid fa-mobile-screen-button text-indigo-600"></i>
-            導入手機主畫面「打工薪水帳」現有資料
-          </span>
-          <span class="px-2 py-0.5 rounded-full bg-white text-indigo-700 font-semibold text-[10px] border border-indigo-200">一鍵綁定</span>
-        </div>
-        <p class="text-[11px] text-slate-600 leading-relaxed">
-          因手機系統會將「已加入主畫面」的薪資 App 儲存在獨立隔離空間：請在主畫面薪資 App 點選「<b>⚙️ 設定 ➔ 匯出備份</b>」（或「<b>⏰ 提醒 ➔ 一鍵複製目前班表 JSON</b>」），再點下方按鈕即可<b>完整導入所有班表、印章與時薪並永久綁定雲端</b>！
-        </p>
-        <input id="shiftBackupFileInput" type="file" accept=".json,application/json" class="hidden" />
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" id="btnTriggerShiftFileImport" class="btn-press py-2.5 px-2.5 rounded-xl bg-indigo-600 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs">
-            <i class="fa-solid fa-file-import"></i> 📂 匯入備份檔 (.json)
-          </button>
-          <button type="button" id="btnImportShiftFromClipboard" class="btn-press py-2.5 px-2.5 rounded-xl bg-white border border-indigo-200 text-indigo-700 font-bold text-xs flex items-center justify-center gap-1">
-            <i class="fa-solid fa-paste"></i> 📋 貼上剪貼簿導入
-          </button>
+        <div class="text-xs text-[#D1D5DB] leading-relaxed space-y-1.5">
+          <div>1. <b>金融卡預算自動抓 ATM 存款</b>：去 ATM 存多少錢進金融卡，收到通知或在首頁登記存入即自動累加進「本月可用額度」。</div>
+          <div>2. <b>留在身上的現金放首頁控管</b>：沒存進 ATM 的現金直接在首頁「皮包現金」登記消費。</div>
+          <div>3. <b>班表 App 轉為「領現信封核對器」</b>：排班算的金額只幫你核對發薪日現金，不會亂改金融卡可用預算。</div>
         </div>
       </div>
 
-      <!-- ⏳ 彈窗內：薪資班表 ↔ 現實發薪時間對照切換 -->
-      <div class="rounded-2xl bg-amber-50/80 border border-amber-200 p-3.5 space-y-2.5 text-xs">
-        <div class="flex items-center justify-between">
-          <span class="font-bold text-amber-950 flex items-center gap-1.5">
-            <i class="fa-solid fa-clock text-amber-600"></i> 班表月份 ↔ 現實發薪時間對照模式
-          </span>
-          <span id="modalMappingModeBadge" class="px-2 py-0.5 rounded-full bg-white text-amber-800 font-bold text-[10px] border border-amber-200">次月發薪制</span>
-        </div>
-        <div id="modalTimeMappingSummary" class="text-[11px] text-amber-900/90 leading-relaxed">
-          • <b>現在花的錢</b>：對應上個月班表或下方手動輸入的目前已領薪資<br/>
-          • <b>現在排的班</b>：對應這個月上班累積、下個月發薪日才會拿到的薪水
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" data-set-mapping-mode="NEXT_MONTH_PAY" class="mapping-mode-btn btn-press py-2 px-2 rounded-xl bg-slate-900 text-white font-bold text-[11px]">
-            🕒 次月發薪（本月班＝下月領）
-          </button>
-          <button type="button" data-set-mapping-mode="SAME_MONTH_PAY" class="mapping-mode-btn btn-press py-2 px-2 rounded-xl bg-white border border-amber-200 text-slate-700 font-semibold text-[11px]">
-            ⚡ 當月抵用（本月班＝現在花）
-          </button>
-        </div>
-      </div>
-
-      <div class="pt-1 border-t border-slate-100 space-y-3">
-        <div class="text-xs font-semibold text-slate-500">或直接手動指定「目前這個月手頭可用薪資」/ 時薪：</div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-xs text-slate-400 block mb-1">本月實領薪資 ($)</label>
-            <input id="manualNetSalaryInput" type="number" min="0" class="input-fintech w-full font-bold text-emerald-600" placeholder="例：25000" />
+      <div class="space-y-4">
+        <div class="text-xs font-semibold text-[#D1D5DB]">⚙️ 設定工時換算時薪 / 金融卡額外期初底金（選填）</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="space-y-1.5">
+            <label for="manualNetSalaryInput" class="text-xs text-[#8E95A5] block">額外期初底金 ($)</label>
+            <input id="manualNetSalaryInput" type="number" min="0" class="input-fintech w-full font-semibold text-emerald-400 tabular-nums" placeholder="若純靠 ATM 存款填 0" />
           </div>
-          <div>
-            <label class="text-xs text-slate-400 block mb-1">目前時薪 ($/hr)</label>
-            <input id="manualHourlyWageInput" type="number" min="1" class="input-fintech w-full font-bold text-slate-900" placeholder="例：200" value="200" />
+          <div class="space-y-1.5">
+            <label for="manualHourlyWageInput" class="text-xs text-[#8E95A5] block">目前時薪 ($/hr)</label>
+            <input id="manualHourlyWageInput" type="number" min="1" class="input-fintech w-full font-semibold tabular-nums" placeholder="例：200" value="200" />
           </div>
         </div>
 
         <input id="shiftJsonInput" type="hidden" value="" />
 
-        <button id="btnConfirmShiftSync" class="btn-press w-full py-3 rounded-2xl bg-slate-900 text-white font-semibold text-xs shadow-sm">
-          儲存手動薪資設定
+        <button id="btnConfirmShiftSync" class="btn-press btn-primary w-full py-3.5 text-sm">
+          儲存時薪與期初底金設定
         </button>
       </div>
+
+      <details class="group apple-inset !p-0 overflow-hidden text-xs">
+        <summary class="cursor-pointer px-4 py-3.5 flex items-center justify-between font-semibold text-[#D1D5DB] hover:text-white">
+          <span>💼 選用：開啟「打工薪水帳」核對領現薪資袋</span>
+          <i class="fa-solid fa-chevron-down text-xs text-[#8E95A5] group-open:rotate-180 transition-transform"></i>
+        </summary>
+        <div class="px-4 pb-4 pt-2 border-t border-white/[0.06] space-y-3">
+          <p class="text-xs text-[#8E95A5] leading-relaxed">
+            想確認發薪日老闆信封袋應該給你多少現金？可點下方開啟排班表計算應領現金：
+          </p>
+          <button type="button" id="btnOpenEmbeddedShiftApp" class="btn-press btn-primary w-full py-3 text-xs flex items-center justify-center gap-2">
+            <i class="fa-solid fa-calendar-days"></i>
+            <span>開啟排班表試算應領現金</span>
+          </button>
+          <input id="shiftBackupFileInput" type="file" accept=".json,application/json" class="hidden" />
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button type="button" id="btnTriggerShiftFileImport" class="btn-press btn-secondary py-2.5 px-3 text-xs">
+              📂 匯入班表備份 (.json)
+            </button>
+            <button type="button" id="btnImportShiftFromClipboard" class="btn-press btn-secondary py-2.5 px-3 text-xs">
+              📋 貼上剪貼簿班表
+            </button>
+          </div>
+          <div class="hidden">
+            <button type="button" id="btnAutoPullShiftNow"></button>
+            <span id="modalMappingModeBadge"></span>
+            <div id="modalTimeMappingSummary"></div>
+          </div>
+        </div>
+      </details>
     </div>
   </div>
 
   <!-- ==================== 彈窗 6：內嵌式「打工薪水帳 V2」即時連動視窗 ==================== -->
-  <div id="modalEmbeddedShiftApp" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-xs flex flex-col">
-    <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800">
-      <div class="flex items-center gap-2">
+  <div id="modalEmbeddedShiftApp" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex flex-col">
+    <div class="bg-[#12151E] text-[#F5F5F7] px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08]">
+      <div class="flex items-center gap-2.5">
         <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
         <div>
-          <div class="text-sm font-bold leading-tight">💰 打工薪水帳 V2（全自動即時連動中）</div>
-          <div class="text-[11px] text-slate-400">點選日期排班或上傳班表照片，關閉視窗即自動更新記帳預算</div>
+          <div class="text-sm font-semibold leading-tight">💰 打工薪水帳 V2（全自動即時連動中）</div>
+          <div class="text-xs text-[#8E95A5]">點選日期排班或上傳班表照片，關閉視窗即自動更新記帳預算</div>
         </div>
       </div>
-      <div class="flex items-center gap-1.5">
-        <button type="button" id="btnEmbedImportShift" class="btn-press px-2.5 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold">
+      <div class="flex items-center gap-2">
+        <button type="button" id="btnEmbedImportShift" class="btn-press btn-secondary px-3 py-2 text-xs">
           📲 匯入主畫面班表
         </button>
-        <a href="/shift-pay" target="_blank" class="px-2.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-medium">↗ 獨立分頁</a>
-        <button type="button" id="btnCloseEmbeddedShiftApp" class="btn-press px-3.5 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs">
+        <a href="/shift-pay" target="_blank" class="btn-press btn-secondary px-3 py-2 text-xs">↗ 獨立分頁</a>
+        <button type="button" id="btnCloseEmbeddedShiftApp" class="btn-press btn-primary px-4 py-2 text-xs">
           ✅ 完成並同步
         </button>
       </div>
@@ -811,79 +888,73 @@
   </div>
 
   <!-- ==================== 彈窗 4：玉山可用餘額校正 Bottom Sheet ==================== -->
-  <div id="modalBalanceSync" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl">
-      <div class="flex items-center justify-between">
+  <div id="modalBalanceSync" class="fixed inset-0 z-50 hidden bg-black/65 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="sheet-panel w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 sm:p-8 space-y-6">
+      <div class="flex items-start justify-between gap-3">
         <div>
-          <h3 class="text-base font-bold text-slate-900">玉山可用餘額校正</h3>
-          <p class="text-xs text-slate-400">系統推算剩餘：<b id="syncExpectedLabel" class="text-slate-900">$0</b></p>
+          <h3 class="text-lg font-semibold text-[#F5F5F7]">玉山可用餘額校正</h3>
+          <p class="text-xs text-[#8E95A5] mt-1">系統推算剩餘：<b id="syncExpectedLabel" class="text-[#F5F5F7] tabular-nums">$0</b></p>
         </div>
-        <button data-close-modal="modalBalanceSync" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
+        <button data-close-modal="modalBalanceSync" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center">✕</button>
       </div>
 
-      <input id="actualEsunInput" type="number" class="input-fintech w-full text-lg font-bold" placeholder="輸入玉山 Wallet 可用餘額 ($)" />
-      <button id="btnConfirmBalanceSync" class="btn-press w-full py-3.5 rounded-2xl bg-slate-900 text-white font-semibold text-sm">
+      <input id="actualEsunInput" type="number" class="input-fintech w-full text-lg font-semibold tabular-nums" placeholder="輸入玉山 Wallet 可用餘額 ($)" />
+      <button id="btnConfirmBalanceSync" class="btn-press btn-primary w-full py-3.5 text-sm">
         比對並校正安全額度
       </button>
     </div>
   </div>
 
   <!-- ==================== 彈窗 5：新增固定扣款 / 訂閱 / 分期 Bottom Sheet ==================== -->
-  <div id="modalFixedExpense" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl">
-      <div class="flex items-center justify-between">
+  <div id="modalFixedExpense" class="fixed inset-0 z-50 hidden bg-black/65 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="sheet-panel w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 sm:p-8 space-y-6">
+      <div class="flex items-start justify-between gap-3">
         <div>
-          <h3 class="text-base font-bold text-slate-900">新增固定扣款與分期</h3>
-          <p class="text-xs text-slate-400">自動從每月可用預算預先扣除</p>
+          <h3 class="text-lg font-semibold text-[#F5F5F7]">新增固定扣款與分期</h3>
+          <p class="text-xs text-[#8E95A5] mt-0.5">自動從每月可用預算預先扣除</p>
         </div>
-        <button data-close-modal="modalFixedExpense" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
+        <button data-close-modal="modalFixedExpense" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center">✕</button>
       </div>
 
-      <div class="space-y-3 text-xs">
-        <div class="grid grid-cols-2 gap-2.5">
-          <div>
-            <label class="text-slate-400 block mb-1">項目名稱</label>
+      <div class="space-y-4 text-xs">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="space-y-1.5">
+            <label for="fxName" class="text-[#8E95A5] block font-medium">項目名稱</label>
             <input id="fxName" type="text" class="input-fintech w-full" placeholder="例：Netflix / 手機費" />
           </div>
-          <div>
-            <label class="text-slate-400 block mb-1">每月金額 ($)</label>
-            <input id="fxAmount" type="number" class="input-fintech w-full font-semibold" placeholder="例：390" />
+          <div class="space-y-1.5">
+            <label for="fxAmount" class="text-[#8E95A5] block font-medium">每月金額 ($)</label>
+            <input id="fxAmount" type="number" class="input-fintech w-full font-semibold tabular-nums" placeholder="例：390" />
           </div>
         </div>
 
-        <div class="grid grid-cols-3 gap-2">
-          <div>
-            <label class="text-slate-400 block mb-1">類型</label>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="space-y-1.5">
+            <label for="fxType" class="text-[#8E95A5] block font-medium">類型</label>
             <select id="fxType" class="input-fintech w-full text-xs">
               <option value="SUBSCRIPTION">訂閱制</option>
               <option value="INSTALLMENT">分期付款</option>
               <option value="FIXED">固定開銷</option>
             </select>
           </div>
-          <div>
-            <label class="text-slate-400 block mb-1">扣款日(1~31)</label>
-            <input id="fxDay" type="number" min="1" max="31" class="input-fintech w-full" placeholder="15" />
+          <div class="space-y-1.5">
+            <label for="fxDay" class="text-[#8E95A5] block font-medium">扣款日 (1~31)</label>
+            <input id="fxDay" type="number" min="1" max="31" class="input-fintech w-full tabular-nums" placeholder="15" />
           </div>
-          <div>
-            <label class="text-slate-400 block mb-1">分期剩餘期數</label>
-            <input id="fxRemain" type="number" min="1" max="36" class="input-fintech w-full" placeholder="6" />
+          <div class="space-y-1.5">
+            <label for="fxRemain" class="text-[#8E95A5] block font-medium">分期剩餘期數</label>
+            <input id="fxRemain" type="number" min="1" max="36" class="input-fintech w-full tabular-nums" placeholder="6" />
           </div>
         </div>
 
-        <button id="btnAddFixedExpense" class="btn-press w-full py-3.5 rounded-2xl bg-slate-900 text-white font-semibold text-sm">
+        <button id="btnAddFixedExpense" class="btn-press btn-primary w-full py-3.5 text-sm">
           儲存固定扣款
         </button>
       </div>
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v12"></script>
-  <script src="/js/app.js?v=20261021v12"></script>
+  <script src="/js/browserEngine.js?v=20261022v15"></script>
+  <script src="/js/app.js?v=20261022v15"></script>
 </body>
 </html>
-
-
-
-
-
-
