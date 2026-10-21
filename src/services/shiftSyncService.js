@@ -47,7 +47,7 @@ function isUnpaid(sh) {
   return sh.status === 'leave' && sh.leaveType === 'leave';
 }
 
-function computeShiftPayFromFullState(shiftState, targetYearMonth) {
+function computeShiftPayFromFullState(shiftState, targetYearMonth, explicitMonth = null) {
   const settings = shiftState.settings || {};
   const hourlyWage = Number(settings.hourlyWage) || 200;
   const otMultiplier = Number.isFinite(Number(settings.otMultiplier)) ? Number(settings.otMultiplier) : 1;
@@ -57,8 +57,11 @@ function computeShiftPayFromFullState(shiftState, targetYearMonth) {
 
   let ym = targetYearMonth;
   const allKeys = Object.keys(shifts).sort();
+  if (explicitMonth && allKeys.some(k => k.startsWith(explicitMonth + '-')) && (!ym || !allKeys.some(k => k.startsWith(ym + '-')))) {
+    ym = explicitMonth;
+  }
   if (!ym || !allKeys.some(k => k.startsWith(ym + '-'))) {
-    ym = allKeys.length > 0 ? allKeys[allKeys.length - 1].slice(0, 7) : new Date().toISOString().slice(0, 7);
+    ym = allKeys.length > 0 ? allKeys[allKeys.length - 1].slice(0, 7) : (explicitMonth || new Date().toISOString().slice(0, 7));
   }
 
   const prefix = ym + '-';
@@ -102,13 +105,22 @@ function parseShiftPayload(payload, preferredMonth) {
   if (!data || typeof data !== 'object') {
     throw new Error('無效的班表 JSON 資料');
   }
+  if (data.fullState && typeof data.fullState === 'object' && data.fullState.shifts) {
+    const computed = computeShiftPayFromFullState(data.fullState, preferredMonth, data.month);
+    return { ...computed, fullState: data.fullState };
+  }
   if (data.state && typeof data.state === 'object' && data.state.shifts) {
-    const computed = computeShiftPayFromFullState(data.state, preferredMonth || data.month);
+    const computed = computeShiftPayFromFullState(data.state, preferredMonth, data.month);
     return { ...computed, fullState: data.state };
   }
   if (data.shifts && typeof data.shifts === 'object') {
-    const computed = computeShiftPayFromFullState(data, preferredMonth);
-    return { ...computed, fullState: data };
+    const cleanFullState = {
+      settings: data.settings || {},
+      stamps: Array.isArray(data.stamps) ? data.stamps : undefined,
+      shifts: data.shifts
+    };
+    const computed = computeShiftPayFromFullState(cleanFullState, preferredMonth, data.month);
+    return { ...computed, fullState: cleanFullState };
   }
   if (typeof data.totalPay === 'number' && !data.shifts) {
     return {
@@ -122,7 +134,8 @@ function parseShiftPayload(payload, preferredMonth) {
       otMinutes: Number(data.otMinutes) || 0,
       bonusOk: Boolean(data.bonusOk),
       bonusPay: Math.round(Number(data.bonusPay) || 0),
-      shiftCount: Number(data.shiftCount) || (Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0)
+      shiftCount: Number(data.shiftCount) || (Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0),
+      fullState: data.state || data.fullState || null
     };
   }
   throw new Error('無法識別的班表資料結構');

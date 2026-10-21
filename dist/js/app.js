@@ -186,6 +186,25 @@ function renderDashboard(state) {
   renderRadarSection(radar);
   renderPatchesSection(walletTank, splitBills);
   renderSettingsSection(settings);
+
+  // 若雲端週期含有已綁定的完整班表狀態，自動寫入本機 shiftpay.v1 讓內嵌與分頁排班表直接顯示完整資料
+  try {
+    const cloudFullState = survival?.cycle?.rawShiftPayload?.fullState;
+    if (cloudFullState && cloudFullState.shifts && Object.keys(cloudFullState.shifts).length > 0) {
+      const existingRaw = localStorage.getItem('shiftpay.v1');
+      const existingObj = existingRaw ? JSON.parse(existingRaw) : null;
+      const existingCount = existingObj?.shifts ? Object.keys(existingObj.shifts).length : 0;
+      if (existingCount === 0) {
+        localStorage.setItem('shiftpay.v1', JSON.stringify(cloudFullState));
+        localStorage.setItem('shiftpay.v2.bridge', JSON.stringify({
+          app: 'shiftpay-v2',
+          updatedAt: survival.cycle.lastSyncedAt || new Date().toISOString(),
+          month: survival.cycle.targetShiftMonth,
+          state: cloudFullState
+        }));
+      }
+    }
+  } catch (_) {}
 }
 
 function statusLabelOf(status) {
@@ -472,14 +491,21 @@ function renderPatchesSection(walletTank, splitBills) {
 
 function renderSettingsSection(settings) {
   if (!settings) return;
-  $('#setPayday').value = settings.payday_day;
-  $('#setNetFactor').value = settings.net_pay_factor;
-  $('#setLaborDeduct').value = settings.labor_health_deduction;
-  $('#setShiftPath').value = settings.shift_app_path;
-  $('#setGmailUser').value = settings.gmail_user || '';
-  if ($('#modalGmailUser')) {
-    $('#modalGmailUser').value = settings.gmail_user || '';
-  }
+  const setValIfNotFocused = (sel, val) => {
+    const el = $(sel);
+    if (!el) return;
+    el.classList.remove('hidden');
+    if (document.activeElement !== el) {
+      el.value = val;
+    }
+  };
+  setValIfNotFocused('#setPayday', settings.payday_day);
+  setValIfNotFocused('#setNetFactor', settings.net_pay_factor);
+  setValIfNotFocused('#setLaborDeduct', settings.labor_health_deduction);
+  if ($('#setShiftPath')) $('#setShiftPath').value = settings.shift_app_path;
+  setValIfNotFocused('#setGmailUser', settings.gmail_user || '');
+  setValIfNotFocused('#modalGmailUser', settings.gmail_user || '');
+  $('#modalGmailPass')?.classList.remove('hidden');
 }
 
 function switchMainTab(target) {
@@ -531,15 +557,83 @@ function readLocalShiftPayBridgePayload() {
     const bridgeRaw = localStorage.getItem('shiftpay.v2.bridge');
     if (bridgeRaw) {
       const parsed = JSON.parse(bridgeRaw);
-      if (parsed && (parsed.state || parsed.shifts)) return parsed;
+      const shiftsObj = parsed?.state?.shifts || parsed?.shifts;
+      if (parsed && ((shiftsObj && Object.keys(shiftsObj).length > 0) || Number(parsed.totalPay) > 0)) {
+        return parsed;
+      }
     }
     const v1Raw = localStorage.getItem('shiftpay.v1');
     if (v1Raw) {
       const parsed = JSON.parse(v1Raw);
-      if (parsed && parsed.shifts) return parsed;
+      if (parsed && parsed.shifts && Object.keys(parsed.shifts).length > 0) {
+        return parsed;
+      }
     }
   } catch (_) {}
   return null;
+}
+
+async function importShiftPayloadAndBind(rawInput, sourceLabel = '手動匯入') {
+  const data = typeof rawInput === 'string' ? JSON.parse(rawInput) : rawInput;
+  if (!data || typeof data !== 'object') {
+    throw new Error('無效的班表 JSON 格式');
+  }
+
+  const fullState = (data.state && typeof data.state === 'object' && data.state.shifts)
+    ? data.state
+    : ((data.fullState && typeof data.fullState === 'object' && data.fullState.shifts)
+        ? data.fullState
+        : (data.shifts && typeof data.shifts === 'object'
+            ? {
+                settings: data.settings || {},
+                stamps: Array.isArray(data.stamps) ? data.stamps : undefined,
+                shifts: data.shifts
+              }
+            : null));
+
+  if (!fullState && typeof data.totalPay !== 'number') {
+    throw new Error('找不到班表排班紀錄 (shifts) 或薪資資料，請確認檔案為「打工薪水帳」匯出之備份檔或 JSON');
+  }
+
+  if (fullState) {
+    try {
+      // 保留既有 Gemini API Key 避免被空字串覆蓋
+      const prevRaw = localStorage.getItem('shiftpay.v1');
+      const prevObj = prevRaw ? JSON.parse(prevRaw) : null;
+      if (prevObj?.settings?.apiKey && fullState.settings && !fullState.settings.apiKey) {
+        fullState.settings.apiKey = prevObj.settings.apiKey;
+      }
+    } catch (_) {}
+
+    localStorage.setItem('shiftpay.v1', JSON.stringify(fullState));
+    localStorage.setItem('shiftpay.v2.bridge', JSON.stringify({
+      app: 'shiftpay-v2',
+      updatedAt: new Date().toISOString(),
+      month: data.month || undefined,
+      state: fullState
+    }));
+  }
+
+  const res = await apiCall('/api/shift/sync', 'POST', {
+    rawJsonPayload: data,
+    autoSync: false
+  });
+
+  if (res && res.dashboard) {
+    renderDashboard(res.dashboard);
+  }
+
+  const iframe = $('#shiftAppIframe');
+  if (iframe && iframe.src && iframe.src !== 'about:blank') {
+    try {
+      iframe.contentWindow?.location?.reload();
+    } catch (_) {
+      iframe.src = '/shift-pay?t=' + Date.now();
+    }
+  }
+
+  showAutoToast(`🎉 已從${sourceLabel}成功導入班表與薪資！目前可用預算 $${Number(res?.cycle?.estimated_net_pay || res?.dashboard?.survival?.budget?.effectiveIncome || 0).toLocaleString()}`);
+  return res;
 }
 
 async function autoSyncShiftFromBridge(explicitPayload = null, showNotice = false) {
@@ -568,7 +662,16 @@ async function checkClipboardForBankNotification() {
     if (localStorage.getItem('anti_broke_auto_clipboard') === '0') return;
     if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') return;
     const clip = (await navigator.clipboard.readText() || '').trim();
-    if (!clip || clip.length < 12 || clip.length > 1500 || clip === lastAutoClipboardText) return;
+    if (!clip || clip.length < 12 || clip === lastAutoClipboardText) return;
+
+    // 1. 自動偵測剪貼簿中的「打工薪水帳 V2」JSON（匯出備份或小工具 JSON）
+    if (clip.startsWith('{') && (clip.includes('"shiftpay-v2"') || (clip.includes('"shifts"') && clip.includes('"hourlyWage"')))) {
+      lastAutoClipboardText = clip;
+      await importShiftPayloadAndBind(clip, '手機剪貼簿');
+      return;
+    }
+
+    if (clip.length > 1500) return;
     const isSwipeNotif = /玉山|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|商店請款|薪資入帳/.test(clip)
       && /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(clip);
     if (!isSwipeNotif) return;
@@ -689,7 +792,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#btnOpenImpulseModal')?.addEventListener('click', openImpulse);
   $('#btnOpenImpulseFromList')?.addEventListener('click', openImpulse);
 
-  const openNotif = () => $('#modalNotifParser')?.classList.remove('hidden');
+  const openNotif = () => {
+    $('#modalGmailUser')?.classList.remove('hidden');
+    $('#modalGmailPass')?.classList.remove('hidden');
+    $('#modalNotifParser')?.classList.remove('hidden');
+  };
   $('#btnOpenNotifModal')?.addEventListener('click', openNotif);
   $('#btnOpenNotifFromList')?.addEventListener('click', openNotif);
   $('#btnHomeAutoSwipeCenter')?.addEventListener('click', openNotif);
@@ -747,8 +854,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (dashboardState) renderTransactionsList(dashboardState.transactions);
   });
 
+  const MODAL_OVERLAY_IDS = new Set([
+    'modalImpulse',
+    'modalNotifParser',
+    'modalShiftSync',
+    'modalBalanceSync',
+    'modalFixedExpense'
+  ]);
+
   document.body.addEventListener('click', async e => {
-    if (e.target.id && e.target.id.startsWith('modal')) {
+    if (e.target.id && MODAL_OVERLAY_IDS.has(e.target.id)) {
       e.target.classList.add('hidden');
       return;
     }
@@ -911,16 +1026,78 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderDashboard(res.dashboard);
   });
 
+  const handleCustomTankDelta = async (tankType, inputSel) => {
+    const inputEl = $(inputSel);
+    if (!inputEl) return;
+    const rawStr = inputEl.value.trim();
+    if (rawStr === '') return;
+    const num = Math.round(Number(rawStr));
+    if (!Number.isFinite(num) || num === 0) return;
+    // 在卡片內「自訂扣款」欄：輸入負數 (-45) 或正數 (45) 預設皆為扣款；若明確輸入 +200 則為加值
+    const deltaAmount = rawStr.startsWith('+') ? Math.abs(num) : -Math.abs(num);
+    const note = deltaAmount < 0 ? '自訂金額扣款' : '自訂金額加值';
+    const res = await apiCall('/api/wallet-tank/adjust', 'POST', { tankType, deltaAmount, note });
+    inputEl.value = '';
+    renderDashboard(res.dashboard);
+  };
+
+  $('#btnCustomEasyAdjust')?.addEventListener('click', () => handleCustomTankDelta('EASYCARD', '#customEasyDeltaInput'));
+  $('#btnCustomCashAdjust')?.addEventListener('click', () => handleCustomTankDelta('CASH', '#customCashDeltaInput'));
+  $('#customEasyDeltaInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleCustomTankDelta('EASYCARD', '#customEasyDeltaInput');
+  });
+  $('#customCashDeltaInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleCustomTankDelta('CASH', '#customCashDeltaInput');
+  });
+
   $('#btnAuditTank')?.addEventListener('click', async () => {
-    const easyVal = $('#auditEasyInput').value;
-    const cashVal = $('#auditCashInput').value;
+    const easyVal = $('#auditEasyInput').value.trim();
+    const cashVal = $('#auditCashInput').value.trim();
+    if (easyVal === '' && cashVal === '') return;
     const res = await apiCall('/api/wallet-tank/audit', 'POST', {
-      easycardBalance: easyVal !== '' ? Number(easyVal) : undefined,
-      cashBalance: cashVal !== '' ? Number(cashVal) : undefined
+      easycardBalance: easyVal !== '' ? easyVal : undefined,
+      cashBalance: cashVal !== '' ? cashVal : undefined
     });
     $('#auditEasyInput').value = '';
     $('#auditCashInput').value = '';
     renderDashboard(res.dashboard);
+  });
+
+  // 📲 導入手機主畫面「打工薪水帳」備份檔 (.json) 或剪貼簿資料
+  const triggerShiftFilePicker = () => $('#shiftBackupFileInput')?.click();
+  $('#btnTriggerShiftFileImport')?.addEventListener('click', triggerShiftFilePicker);
+  $('#btnEmbedImportShift')?.addEventListener('click', triggerShiftFilePicker);
+
+  $('#shiftBackupFileInput')?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      await importShiftPayloadAndBind(text, `備份檔 (${file.name})`);
+      $('#modalShiftSync')?.classList.add('hidden');
+    } catch (err) {
+      alert('匯入班表備份檔失敗：' + err.message);
+    }
+  });
+
+  $('#btnImportShiftFromClipboard')?.addEventListener('click', async () => {
+    let raw = '';
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+        raw = (await navigator.clipboard.readText() || '').trim();
+      }
+    } catch (_) {}
+    if (!raw || !raw.startsWith('{')) {
+      raw = (prompt('請長按貼上從主畫面「打工薪水帳」複製的班表 JSON 數據：') || '').trim();
+    }
+    if (!raw) return;
+    try {
+      await importShiftPayloadAndBind(raw, '剪貼簿');
+      $('#modalShiftSync')?.classList.add('hidden');
+    } catch (err) {
+      alert('從剪貼簿導入失敗：' + err.message);
+    }
   });
 
   $('#btnConfirmShiftSync')?.addEventListener('click', async () => {

@@ -117,14 +117,44 @@ function quickAdjustWalletTank(db, { tankType = 'CASH', deltaAmount = -50, note 
   return getWalletTankStatus(db, nowIso);
 }
 
-function auditWalletTank(db, { easycardBalance, cashBalance }) {
+function auditWalletTank(db, { easycardBalance, cashBalance, easycardMode, cashMode }) {
   const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
   const nowIso = new Date().toISOString();
-  const newEasy = easycardBalance !== undefined ? Math.max(0, Math.round(Number(easycardBalance))) : tank.easycard_balance;
-  const newCash = cashBalance !== undefined ? Math.max(0, Math.round(Number(cashBalance))) : tank.cash_balance;
+  const curEasy = Number(tank.easycard_balance) || 0;
+  const curCash = Number(tank.cash_balance) || 0;
 
-  const diffEasy = newEasy - tank.easycard_balance;
-  const diffCash = newCash - tank.cash_balance;
+  let newEasy = curEasy;
+  let noteEasy = '3天定期盤點手動校正';
+  if (easycardBalance !== undefined && easycardBalance !== null && String(easycardBalance).trim() !== '') {
+    const strEasy = String(easycardBalance).trim();
+    const numEasy = Math.round(Number(strEasy));
+    if (Number.isFinite(numEasy)) {
+      if (numEasy < 0 || easycardMode === 'DELTA' || strEasy.startsWith('+')) {
+        newEasy = Math.max(0, curEasy + numEasy);
+        noteEasy = numEasy < 0 ? '自訂扣款消費' : '自訂加值存入';
+      } else {
+        newEasy = Math.max(0, numEasy);
+      }
+    }
+  }
+
+  let newCash = curCash;
+  let noteCash = '3天定期盤點手動校正';
+  if (cashBalance !== undefined && cashBalance !== null && String(cashBalance).trim() !== '') {
+    const strCash = String(cashBalance).trim();
+    const numCash = Math.round(Number(strCash));
+    if (Number.isFinite(numCash)) {
+      if (numCash < 0 || cashMode === 'DELTA' || strCash.startsWith('+')) {
+        newCash = Math.max(0, curCash + numCash);
+        noteCash = numCash < 0 ? '自訂扣款消費' : '自訂加值存入';
+      } else {
+        newCash = Math.max(0, numCash);
+      }
+    }
+  }
+
+  const diffEasy = newEasy - curEasy;
+  const diffCash = newCash - curCash;
 
   db.prepare(`
     UPDATE wallet_tank SET easycard_balance = ?, cash_balance = ?, last_audit_at = ?, updated_at = ? WHERE id = 1
@@ -133,14 +163,14 @@ function auditWalletTank(db, { easycardBalance, cashBalance }) {
   if (diffEasy !== 0) {
     db.prepare(`
       INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
-      VALUES ('EASYCARD', ?, ?, '3天定期盤點手動校正', NULL, ?)
-    `).run(diffEasy, newEasy, nowIso);
+      VALUES ('EASYCARD', ?, ?, ?, NULL, ?)
+    `).run(diffEasy, newEasy, noteEasy, nowIso);
   }
   if (diffCash !== 0) {
     db.prepare(`
       INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
-      VALUES ('CASH', ?, ?, '3天定期盤點手動校正', NULL, ?)
-    `).run(diffCash, newCash, nowIso);
+      VALUES ('CASH', ?, ?, ?, NULL, ?)
+    `).run(diffCash, newCash, noteCash, nowIso);
   }
 
   return getWalletTankStatus(db, nowIso);

@@ -919,6 +919,9 @@ try {
 
 function pushShiftStateToAntiBrokeApp(isManual = false) {
   try {
+    const hasShifts = Boolean(state && state.shifts && Object.keys(state.shifts).length > 0);
+    if (!hasShifts && !isManual) return;
+
     const ym = (typeof viewY !== 'undefined' && typeof viewM !== 'undefined')
       ? `${viewY}-${String(viewM).padStart(2, '0')}`
       : new Date().toISOString().slice(0, 7);
@@ -956,6 +959,57 @@ function pushShiftStateToAntiBrokeApp(isManual = false) {
       }).catch(() => {});
     }
   } catch (_) {}
+}
+
+async function pullShiftStateFromCloud(force = false) {
+  try {
+    const localCount = (state && state.shifts) ? Object.keys(state.shifts).length : 0;
+    if (localCount > 0 && !force) return false;
+
+    const stateEndpoints = [];
+    if (location.protocol.startsWith('http')) {
+      stateEndpoints.push('/api/shift/state');
+    }
+    if (!location.hostname.includes('workers.dev')) {
+      stateEndpoints.push('https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/shift/state');
+    }
+
+    for (const url of stateEndpoints) {
+      try {
+        const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const remote = data?.fullState;
+        if (remote && remote.shifts && Object.keys(remote.shifts).length > 0) {
+          const keepKey = state?.settings?.apiKey || '';
+          const d = DEFAULT_STATE();
+          state = {
+            settings: {
+              ...d.settings,
+              ...(remote.settings || {}),
+              apiKey: keepKey || remote.settings?.apiKey || '',
+              reminders: { ...d.settings.reminders, ...(remote.settings?.reminders || {}) }
+            },
+            stamps: Array.isArray(remote.stamps) && remote.stamps.length > 0 ? remote.stamps : d.stamps,
+            shifts: remote.shifts
+          };
+          localStorage.setItem(LS_KEY, JSON.stringify(state));
+          localStorage.setItem('shiftpay.v2.bridge', JSON.stringify({
+            app: 'shiftpay-v2',
+            updatedAt: data.updatedAt || new Date().toISOString(),
+            state
+          }));
+          if (typeof loadSettingsForm === 'function') loadSettingsForm();
+          if (typeof renderAll === 'function') renderAll();
+          if (typeof toast === 'function') {
+            toast('☁️ 已自動載入您綁定的排班表與薪資設定！', 'success', 2800);
+          }
+          return true;
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return false;
 }
 
 function save() {
@@ -1858,6 +1912,7 @@ $('#btnSaveSettings').addEventListener('click', () => saveSettingsFromForm(true)
 });
 
 $('#btnExport').addEventListener('click', () => {
+  pushShiftStateToAntiBrokeApp(true);
   const data = { ...state, settings: { ...state.settings, apiKey: '' }, exportedAt: new Date().toISOString(), app: 'shiftpay-v2' };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -2132,7 +2187,12 @@ function buildWidgetPayload() {
       name: item.sh ? item.sh.name : '休',
       time: (item.sh && !isUnpaid(item.sh)) ? `${item.sh.start}-${item.sh.end}` : '休假',
       wakeTime: item.wakeTime
-    }))
+    })),
+    state: {
+      settings: { ...state.settings, apiKey: '' },
+      stamps: state.stamps,
+      shifts: state.shifts
+    }
   };
 }
 
@@ -2507,10 +2567,11 @@ $('#btnExportICS').addEventListener('click', () => {
 
 // Scriptable 連動按鈕
 $('#btnCopyWidgetJson').addEventListener('click', async () => {
+  pushShiftStateToAntiBrokeApp(true);
   const json = JSON.stringify(buildWidgetPayload());
   const ok = await copyText(json);
   renderToolsTab();
-  toast(ok ? '✅ 已複製班表 JSON！回桌面點一下 Scriptable 小工具即可秒更新' : '複製失敗，請展開下方手動複製', ok ? 'success' : 'error', 3500);
+  toast(ok ? '✅ 已複製班表 JSON 並同步至記帳 App！' : '複製失敗，請展開下方手動複製', ok ? 'success' : 'error', 3500);
 });
 $('#btnDownloadWidgetJson').addEventListener('click', () => {
   const json = JSON.stringify(buildWidgetPayload(), null, 2);
@@ -3023,7 +3084,23 @@ loadSettingsForm();
 renderAll();
 if (state && state.shifts && Object.keys(state.shifts).length > 0) {
   pushShiftStateToAntiBrokeApp(false);
+} else {
+  pullShiftStateFromCloud(false);
 }
+window.addEventListener('pageshow', () => {
+  if (state && state.shifts && Object.keys(state.shifts).length > 0) {
+    pushShiftStateToAntiBrokeApp(false);
+  } else {
+    pullShiftStateFromCloud(false);
+  }
+});
+window.addEventListener('storage', ev => {
+  if (ev.key === LS_KEY && ev.newValue) {
+    state = loadState();
+    loadSettingsForm();
+    renderAll();
+  }
+});
 </script>
 </body>
 </html>

@@ -87,6 +87,41 @@ async function handleCloudflareApiRequest(request, env) {
     let bestSnapshot;
     if (d1Snapshot && clientSnapshot) {
       bestSnapshot = (d1Time >= clientTime || d1Ver >= clientVer) ? d1Snapshot : clientSnapshot;
+      const otherSnapshot = bestSnapshot === d1Snapshot ? clientSnapshot : d1Snapshot;
+
+      // 保護已同步的班表與薪資週期：避免前端空白初始週期覆蓋雲端已綁定的班表資料
+      if (Array.isArray(otherSnapshot?.tables?.income_cycles)) {
+        bestSnapshot.tables = bestSnapshot.tables || {};
+        bestSnapshot.tables.income_cycles = Array.isArray(bestSnapshot.tables.income_cycles)
+          ? bestSnapshot.tables.income_cycles
+          : [];
+        for (const otherCycle of otherSnapshot.tables.income_cycles) {
+          const idx = bestSnapshot.tables.income_cycles.findIndex(c => c.cycle_key === otherCycle.cycle_key);
+          const otherHasShift = Boolean(otherCycle.raw_shift_payload || Number(otherCycle.shift_gross_pay) > 0 || Number(otherCycle.estimated_net_pay) > 0);
+          if (idx === -1) {
+            bestSnapshot.tables.income_cycles.push(otherCycle);
+          } else {
+            const curCycle = bestSnapshot.tables.income_cycles[idx];
+            const curHasShift = Boolean(curCycle.raw_shift_payload || Number(curCycle.shift_gross_pay) > 0 || Number(curCycle.estimated_net_pay) > 0);
+            if (!curHasShift && otherHasShift) {
+              bestSnapshot.tables.income_cycles[idx] = otherCycle;
+            } else if (otherCycle.raw_shift_payload && !curCycle.raw_shift_payload) {
+              bestSnapshot.tables.income_cycles[idx] = {
+                ...curCycle,
+                raw_shift_payload: otherCycle.raw_shift_payload
+              };
+            }
+          }
+        }
+      }
+
+      // 保護已綁定的 Gmail 帳號與應用程式密碼
+      const bestSet = bestSnapshot?.tables?.user_settings?.[0];
+      const otherSet = otherSnapshot?.tables?.user_settings?.[0];
+      if (bestSet && otherSet) {
+        if (!bestSet.gmail_user && otherSet.gmail_user) bestSet.gmail_user = otherSet.gmail_user;
+        if (!bestSet.gmail_app_password && otherSet.gmail_app_password) bestSet.gmail_app_password = otherSet.gmail_app_password;
+      }
     } else {
       bestSnapshot = d1Snapshot || clientSnapshot;
     }

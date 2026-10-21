@@ -11,7 +11,7 @@
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261021v9" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261021v10" />
 </head>
 <body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -326,6 +326,10 @@
               <button data-tank-quick="EASYCARD|-50|銅板" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$50</button>
               <button data-tank-quick="EASYCARD|-100|餐費" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$100</button>
             </div>
+            <div class="flex items-center gap-1 pt-1">
+              <input id="customEasyDeltaInput" type="number" class="input-fintech w-full !py-1.5 !px-2.5 !rounded-xl text-xs" placeholder="自訂如 -45" />
+              <button type="button" id="btnCustomEasyAdjust" class="btn-press shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-900 text-white text-[11px] font-semibold">扣款</button>
+            </div>
           </div>
 
           <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3.5 space-y-2">
@@ -336,21 +340,28 @@
               <button data-tank-quick="CASH|-100|便當" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$100</button>
               <button data-tank-quick="CASH|-200|採買" class="btn-press px-2 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700">-$200</button>
             </div>
+            <div class="flex items-center gap-1 pt-1">
+              <input id="customCashDeltaInput" type="number" class="input-fintech w-full !py-1.5 !px-2.5 !rounded-xl text-xs" placeholder="自訂如 -65" />
+              <button type="button" id="btnCustomCashAdjust" class="btn-press shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-900 text-white text-[11px] font-semibold">扣款</button>
+            </div>
           </div>
         </div>
 
-        <details class="group rounded-2xl bg-slate-50 border border-slate-100 p-3">
+        <details open class="group rounded-2xl bg-slate-50 border border-slate-100 p-3">
           <summary class="cursor-pointer list-none flex items-center justify-between text-xs font-semibold text-slate-700">
-            <span>📋 盤點調整水庫餘額 / 變動紀錄</span>
+            <span>📋 盤點設定水庫餘額 / 自訂增減與紀錄</span>
             <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-open:rotate-180 transition-transform"></i>
           </summary>
           <div class="mt-3 space-y-2.5">
+            <div class="text-[11px] text-slate-500 leading-relaxed">
+              💡 輸入<b>正數</b>（如 <code class="text-slate-700 font-semibold">500</code>）可設定目前總餘額；輸入<b>負數</b>（如 <code class="text-rose-600 font-semibold">-80</code>）會自動從目前餘額扣減，不會歸零！
+            </div>
             <div class="grid grid-cols-2 gap-2">
-              <input id="auditEasyInput" type="number" class="input-fintech text-xs" placeholder="悠遊卡實際餘額 $" />
-              <input id="auditCashInput" type="number" class="input-fintech text-xs" placeholder="現金實際餘額 $" />
+              <input id="auditEasyInput" type="number" class="input-fintech text-xs" placeholder="悠遊卡餘額 或 -扣款 $" />
+              <input id="auditCashInput" type="number" class="input-fintech text-xs" placeholder="現金餘額 或 -扣款 $" />
             </div>
             <button id="btnAuditTank" class="btn-press w-full py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs">
-              更新盤點餘額
+              確認更新 / 扣減水庫餘額
             </button>
             <div id="tankLogsList" class="space-y-1 max-h-36 overflow-y-auto pt-1"></div>
           </div>
@@ -655,6 +666,29 @@
         </button>
       </div>
 
+      <!-- 📲 導入手機主畫面「打工薪水帳」現有資料（跨 App 沙盒橋接） -->
+      <div class="rounded-2xl bg-indigo-50/70 border border-indigo-200/80 p-4 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+            <i class="fa-solid fa-mobile-screen-button text-indigo-600"></i>
+            導入手機主畫面「打工薪水帳」現有資料
+          </span>
+          <span class="px-2 py-0.5 rounded-full bg-white text-indigo-700 font-semibold text-[10px] border border-indigo-200">一鍵綁定</span>
+        </div>
+        <p class="text-[11px] text-slate-600 leading-relaxed">
+          因手機系統會將「已加入主畫面」的薪資 App 儲存在獨立隔離空間：請在主畫面薪資 App 點選「<b>⚙️ 設定 ➔ 匯出備份</b>」（或「<b>⏰ 提醒 ➔ 一鍵複製目前班表 JSON</b>」），再點下方按鈕即可<b>完整導入所有班表、印章與時薪並永久綁定雲端</b>！
+        </p>
+        <input id="shiftBackupFileInput" type="file" accept=".json,application/json" class="hidden" />
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" id="btnTriggerShiftFileImport" class="btn-press py-2.5 px-2.5 rounded-xl bg-indigo-600 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs">
+            <i class="fa-solid fa-file-import"></i> 📂 匯入備份檔 (.json)
+          </button>
+          <button type="button" id="btnImportShiftFromClipboard" class="btn-press py-2.5 px-2.5 rounded-xl bg-white border border-indigo-200 text-indigo-700 font-bold text-xs flex items-center justify-center gap-1">
+            <i class="fa-solid fa-paste"></i> 📋 貼上剪貼簿導入
+          </button>
+        </div>
+      </div>
+
       <div class="pt-1 border-t border-slate-100 space-y-3">
         <div class="text-xs font-semibold text-slate-500">或直接手動指定固定月薪 / 時薪：</div>
         <div class="grid grid-cols-2 gap-3">
@@ -687,7 +721,10 @@
           <div class="text-[11px] text-slate-400">點選日期排班或上傳班表照片，關閉視窗即自動更新記帳預算</div>
         </div>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1.5">
+        <button type="button" id="btnEmbedImportShift" class="btn-press px-2.5 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold">
+          📲 匯入主畫面班表
+        </button>
         <a href="/shift-pay" target="_blank" class="px-2.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-medium">↗ 獨立分頁</a>
         <button type="button" id="btnCloseEmbeddedShiftApp" class="btn-press px-3.5 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs">
           ✅ 完成並同步
@@ -764,8 +801,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v9"></script>
-  <script src="/js/app.js?v=20261021v9"></script>
+  <script src="/js/browserEngine.js?v=20261021v10"></script>
+  <script src="/js/app.js?v=20261021v10"></script>
 </body>
 </html>
 

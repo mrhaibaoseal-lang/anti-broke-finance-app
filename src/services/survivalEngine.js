@@ -120,18 +120,29 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = n
     return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
   }
 
-  // 模式 D：從自動連動的 shift-pay-app 狀態或外部目錄唯讀同步
+  // 模式 D：從自動連動的 shift-pay-app 狀態、已儲存雲端狀態或外部目錄唯讀同步
+  let existingParsed = null;
+  if (cycle.raw_shift_payload) {
+    try {
+      existingParsed = JSON.parse(cycle.raw_shift_payload);
+    } catch (_) {}
+  }
+
   let synced;
   if (rawJsonPayload) {
     synced = {
       ...parseShiftPayload(rawJsonPayload, cycle.target_shift_month),
       syncSource: 'shift_pay_app_auto_sync'
     };
+    if (!synced.fullState && existingParsed?.fullState) {
+      synced.fullState = existingParsed.fullState;
+    }
     if ((synced.totalPay > 0 || synced.shiftCount > 0) && !process.env.NODE_TEST_CONTEXT) {
       saveLatestShiftSyncCache(rawJsonPayload);
     }
-    // 自動背景同步保護：若班表 App 尚無排班 (totalPay === 0) 且記帳系統已有設定薪資，僅同步時薪而不歸零預算
-    if (isAutoSync && synced.totalPay === 0 && Number(cycle.shift_gross_pay) > 0) {
+    // 自動背景同步保護：若班表 App 尚無排班 (totalPay === 0) 且記帳系統已有設定薪資或既有班表，僅同步時薪而不覆蓋既有班表與預算
+    const existingHasShifts = existingParsed?.fullState?.shifts && Object.keys(existingParsed.fullState.shifts).length > 0;
+    if (isAutoSync && synced.totalPay === 0 && (Number(cycle.shift_gross_pay) > 0 || existingHasShifts)) {
       if (synced.hourlyWage > 0) {
         db.prepare('UPDATE user_settings SET default_hourly_wage = ?, updated_at = ? WHERE id = 1').run(synced.hourlyWage, nowIso);
         db.prepare('UPDATE income_cycles SET hourly_wage = ?, last_synced_at = ? WHERE cycle_key = ?').run(synced.hourlyWage, nowIso, cycle.cycle_key);
@@ -139,7 +150,15 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = n
       return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
     }
   } else {
-    synced = readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+    // 若未傳入 rawJsonPayload，先檢查目前週期是否已有雲端綁定的班表狀態
+    if (existingParsed && (existingParsed.totalPay > 0 || (existingParsed.fullState?.shifts && Object.keys(existingParsed.fullState.shifts).length > 0))) {
+      synced = {
+        ...parseShiftPayload(existingParsed.fullState || existingParsed, cycle.target_shift_month),
+        syncSource: existingParsed.syncSource || 'cloud_shift_bound'
+      };
+    } else {
+      synced = readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+    }
     // 若外部目錄僅讀到 0 元空範本，且當前週期已有班表薪資數據，保留既有數據避免覆蓋歸零
     if ((!synced || synced.totalPay === 0) && Number(cycle.shift_gross_pay) > 0) {
       const estNet = calculateEstimatedNetPay(cycle.shift_gross_pay, settings.net_pay_factor, settings.labor_health_deduction);
@@ -275,6 +294,13 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
       }
     : evaluateSurvivalTier(dailySafeBudget);
 
+  let parsedRawShiftPayload = null;
+  if (cycle.raw_shift_payload) {
+    try {
+      parsedRawShiftPayload = JSON.parse(cycle.raw_shift_payload);
+    } catch (_) {}
+  }
+
   return {
     referenceDate: refDate,
     cycle: {
@@ -286,6 +312,7 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
       netPayFactor: settings.net_pay_factor, laborHealthDeduction: settings.labor_health_deduction,
       estimatedNetPay: cycle.estimated_net_pay, actualSalary: cycle.actual_salary,
       isSalarySettled: Boolean(cycle.is_salary_settled), shiftSyncSource: cycle.shift_sync_source,
+      rawShiftPayload: parsedRawShiftPayload,
       lastSyncedAt: cycle.last_synced_at
     },
     budget: {

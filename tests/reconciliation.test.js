@@ -454,5 +454,65 @@ test('11. Apple Pay 感應刷卡秒級自動偵測：支援 iOS 錢包「交易�
   assert.equal(iosNotifNodeRes.data.result.parsed.amount, 95);
 });
 
+test('12. 修復三大已知問題：現金/悠遊卡自訂負數扣款不歸零、主畫面薪資 App 備份導入與雲端狀態拉取 (/api/shift/state)', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const db = setupTestDb();
+
+  // (1) 先設定悠遊卡 $500、皮包現金 $1,000
+  const initTankRes = await handleApiRequest('POST', '/api/wallet-tank/audit', {
+    easycardBalance: '500',
+    cashBalance: '1000'
+  }, new URLSearchParams(), { db });
+  assert.equal(initTankRes.data.walletTank.easycardBalance, 500);
+  assert.equal(initTankRes.data.walletTank.cashBalance, 1000);
+
+  // (2) 輸入負數（例如悠遊卡 -45、現金 -80）應從餘額中扣除，絕不可直接歸零！
+  const negTankRes = await handleApiRequest('POST', '/api/wallet-tank/audit', {
+    easycardBalance: '-45',
+    cashBalance: '-80'
+  }, new URLSearchParams(), { db });
+  assert.equal(negTankRes.data.walletTank.easycardBalance, 455);
+  assert.equal(negTankRes.data.walletTank.cashBalance, 920);
+
+  // (3) 模擬從手機主畫面「打工薪水帳 V2」匯出備份檔 (.json) 直接導入
+  const backupFileJson = {
+    app: 'shiftpay-v2',
+    exportedAt: '2026-10-21T12:00:00.000Z',
+    settings: {
+      hourlyWage: 215,
+      otMultiplier: 1.34,
+      roundingMode: 'monthly',
+      attendanceBonus: 600,
+      myName: '手機主畫面使用者'
+    },
+    stamps: [{ id: 's1', name: '晚班', color: '#0A84FF', start: '18:00', end: '22:00', breakMin: 0 }],
+    shifts: {
+      '2026-10-15': { name: '晚班', start: '18:00', end: '22:00', breakMin: 0, otMin: 0, status: 'normal' },
+      '2026-10-16': { name: '晚班', start: '18:00', end: '22:00', breakMin: 0, otMin: 0, status: 'normal' }
+    }
+  };
+
+  const importRes = await handleApiRequest('POST', '/api/shift/sync', {
+    rawJsonPayload: backupFileJson,
+    autoSync: false,
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+  assert.equal(importRes.data.ok, true);
+  // 8小時 * $215 = $1,720 + 全勤 $600 = $2,320
+  assert.equal(importRes.data.cycle.shift_gross_pay, 2320);
+
+  // (4) 驗證內嵌 /shift-pay 頁面呼叫 GET /api/shift/state 能拉取完整班表日曆與設定，不再是初始歸零狀態
+  const stateRes = await handleApiRequest('GET', '/api/shift/state', {}, new URLSearchParams(), { db });
+  assert.equal(stateRes.data.ok, true);
+  assert.equal(stateRes.data.hasShiftData, true);
+  assert.equal(stateRes.data.fullState.settings.hourlyWage, 215);
+  assert.equal(Object.keys(stateRes.data.fullState.shifts).length, 2);
+
+  // (5) 驗證點擊「立即重新抓取最新薪資」(空 payload) 時保留已綁定的雲端班表，不會被空範本歸零
+  const repullRes = await handleApiRequest('POST', '/api/shift/sync', {}, new URLSearchParams(), { db });
+  assert.equal(repullRes.data.cycle.shift_gross_pay, 2320);
+});
+
+
 
 

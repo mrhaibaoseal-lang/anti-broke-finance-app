@@ -281,6 +281,27 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
   }
 
   // 3. 薪資設定與跨專案班表全自動同步 (支援 shift-pay-app 即時自動推送、外部目錄自動掃描、或手動微調)
+  if ((method === 'GET' || method === 'POST') && pathname === '/api/shift/state') {
+    const survival = getSurvivalDashboardMetrics(db);
+    const rawPayload = survival.cycle.rawShiftPayload || null;
+    const fullState = rawPayload?.fullState || null;
+    const hasShiftData = Boolean(
+      (fullState?.shifts && Object.keys(fullState.shifts).length > 0) ||
+      (rawPayload && Number(rawPayload.totalPay) > 0)
+    );
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        hasShiftData,
+        fullState,
+        shiftSummary: rawPayload,
+        hourlyWage: survival.cycle.hourlyWage,
+        updatedAt: survival.cycle.lastSyncedAt
+      }
+    };
+  }
+
   if (method === 'POST' && (pathname === '/api/shift/sync' || pathname === '/api/shift/webhook')) {
     const cycle = syncCycleWithShiftData(db, {
       rawJsonPayload: body.rawJsonPayload || body.shiftState || body.payload || null,

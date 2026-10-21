@@ -572,7 +572,7 @@ function isUnpaid(sh) {
   return sh.status === 'leave' && sh.leaveType === 'leave';
 }
 
-function computeShiftPayFromFullState(shiftState, targetYearMonth) {
+function computeShiftPayFromFullState(shiftState, targetYearMonth, explicitMonth = null) {
   const settings = shiftState.settings || {};
   const hourlyWage = Number(settings.hourlyWage) || 200;
   const otMultiplier = Number.isFinite(Number(settings.otMultiplier)) ? Number(settings.otMultiplier) : 1;
@@ -582,8 +582,11 @@ function computeShiftPayFromFullState(shiftState, targetYearMonth) {
 
   let ym = targetYearMonth;
   const allKeys = Object.keys(shifts).sort();
+  if (explicitMonth && allKeys.some(k => k.startsWith(explicitMonth + '-')) && (!ym || !allKeys.some(k => k.startsWith(ym + '-')))) {
+    ym = explicitMonth;
+  }
   if (!ym || !allKeys.some(k => k.startsWith(ym + '-'))) {
-    ym = allKeys.length > 0 ? allKeys[allKeys.length - 1].slice(0, 7) : new Date().toISOString().slice(0, 7);
+    ym = allKeys.length > 0 ? allKeys[allKeys.length - 1].slice(0, 7) : (explicitMonth || new Date().toISOString().slice(0, 7));
   }
 
   const prefix = ym + '-';
@@ -627,13 +630,22 @@ function parseShiftPayload(payload, preferredMonth) {
   if (!data || typeof data !== 'object') {
     throw new Error('無效的班表 JSON 資料');
   }
+  if (data.fullState && typeof data.fullState === 'object' && data.fullState.shifts) {
+    const computed = computeShiftPayFromFullState(data.fullState, preferredMonth, data.month);
+    return { ...computed, fullState: data.fullState };
+  }
   if (data.state && typeof data.state === 'object' && data.state.shifts) {
-    const computed = computeShiftPayFromFullState(data.state, preferredMonth || data.month);
+    const computed = computeShiftPayFromFullState(data.state, preferredMonth, data.month);
     return { ...computed, fullState: data.state };
   }
   if (data.shifts && typeof data.shifts === 'object') {
-    const computed = computeShiftPayFromFullState(data, preferredMonth);
-    return { ...computed, fullState: data };
+    const cleanFullState = {
+      settings: data.settings || {},
+      stamps: Array.isArray(data.stamps) ? data.stamps : undefined,
+      shifts: data.shifts
+    };
+    const computed = computeShiftPayFromFullState(cleanFullState, preferredMonth, data.month);
+    return { ...computed, fullState: cleanFullState };
   }
   if (typeof data.totalPay === 'number' && !data.shifts) {
     return {
@@ -647,7 +659,8 @@ function parseShiftPayload(payload, preferredMonth) {
       otMinutes: Number(data.otMinutes) || 0,
       bonusOk: Boolean(data.bonusOk),
       bonusPay: Math.round(Number(data.bonusPay) || 0),
-      shiftCount: Number(data.shiftCount) || (Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0)
+      shiftCount: Number(data.shiftCount) || (Array.isArray(data.upcoming7Days) ? data.upcoming7Days.filter(d => d.hasShift).length : 0),
+      fullState: data.state || data.fullState || null
     };
   }
   throw new Error('無法識別的班表資料結構');
@@ -885,18 +898,29 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = n
     return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
   }
 
-  // 模式 D：從自動連動的 shift-pay-app 狀態或外部目錄唯讀同步
+  // 模式 D：從自動連動的 shift-pay-app 狀態、已儲存雲端狀態或外部目錄唯讀同步
+  let existingParsed = null;
+  if (cycle.raw_shift_payload) {
+    try {
+      existingParsed = JSON.parse(cycle.raw_shift_payload);
+    } catch (_) {}
+  }
+
   let synced;
   if (rawJsonPayload) {
     synced = {
       ...parseShiftPayload(rawJsonPayload, cycle.target_shift_month),
       syncSource: 'shift_pay_app_auto_sync'
     };
+    if (!synced.fullState && existingParsed?.fullState) {
+      synced.fullState = existingParsed.fullState;
+    }
     if ((synced.totalPay > 0 || synced.shiftCount > 0) && !process.env.NODE_TEST_CONTEXT) {
       saveLatestShiftSyncCache(rawJsonPayload);
     }
-    // 自動背景同步保護：若班表 App 尚無排班 (totalPay === 0) 且記帳系統已有設定薪資，僅同步時薪而不歸零預算
-    if (isAutoSync && synced.totalPay === 0 && Number(cycle.shift_gross_pay) > 0) {
+    // 自動背景同步保護：若班表 App 尚無排班 (totalPay === 0) 且記帳系統已有設定薪資或既有班表，僅同步時薪而不覆蓋既有班表與預算
+    const existingHasShifts = existingParsed?.fullState?.shifts && Object.keys(existingParsed.fullState.shifts).length > 0;
+    if (isAutoSync && synced.totalPay === 0 && (Number(cycle.shift_gross_pay) > 0 || existingHasShifts)) {
       if (synced.hourlyWage > 0) {
         db.prepare('UPDATE user_settings SET default_hourly_wage = ?, updated_at = ? WHERE id = 1').run(synced.hourlyWage, nowIso);
         db.prepare('UPDATE income_cycles SET hourly_wage = ?, last_synced_at = ? WHERE cycle_key = ?').run(synced.hourlyWage, nowIso, cycle.cycle_key);
@@ -904,7 +928,15 @@ function syncCycleWithShiftData(db, { rawJsonPayload = null, manualNetSalary = n
       return db.prepare('SELECT * FROM income_cycles WHERE cycle_key = ?').get(cycle.cycle_key);
     }
   } else {
-    synced = readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+    // 若未傳入 rawJsonPayload，先檢查目前週期是否已有雲端綁定的班表狀態
+    if (existingParsed && (existingParsed.totalPay > 0 || (existingParsed.fullState?.shifts && Object.keys(existingParsed.fullState.shifts).length > 0))) {
+      synced = {
+        ...parseShiftPayload(existingParsed.fullState || existingParsed, cycle.target_shift_month),
+        syncSource: existingParsed.syncSource || 'cloud_shift_bound'
+      };
+    } else {
+      synced = readExternalShiftDirectory(settings.shift_app_path, cycle.target_shift_month);
+    }
     // 若外部目錄僅讀到 0 元空範本，且當前週期已有班表薪資數據，保留既有數據避免覆蓋歸零
     if ((!synced || synced.totalPay === 0) && Number(cycle.shift_gross_pay) > 0) {
       const estNet = calculateEstimatedNetPay(cycle.shift_gross_pay, settings.net_pay_factor, settings.labor_health_deduction);
@@ -1040,6 +1072,13 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
       }
     : evaluateSurvivalTier(dailySafeBudget);
 
+  let parsedRawShiftPayload = null;
+  if (cycle.raw_shift_payload) {
+    try {
+      parsedRawShiftPayload = JSON.parse(cycle.raw_shift_payload);
+    } catch (_) {}
+  }
+
   return {
     referenceDate: refDate,
     cycle: {
@@ -1051,6 +1090,7 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
       netPayFactor: settings.net_pay_factor, laborHealthDeduction: settings.labor_health_deduction,
       estimatedNetPay: cycle.estimated_net_pay, actualSalary: cycle.actual_salary,
       isSalarySettled: Boolean(cycle.is_salary_settled), shiftSyncSource: cycle.shift_sync_source,
+      rawShiftPayload: parsedRawShiftPayload,
       lastSyncedAt: cycle.last_synced_at
     },
     budget: {
@@ -2345,14 +2385,44 @@ function quickAdjustWalletTank(db, { tankType = 'CASH', deltaAmount = -50, note 
   return getWalletTankStatus(db, nowIso);
 }
 
-function auditWalletTank(db, { easycardBalance, cashBalance }) {
+function auditWalletTank(db, { easycardBalance, cashBalance, easycardMode, cashMode }) {
   const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
   const nowIso = new Date().toISOString();
-  const newEasy = easycardBalance !== undefined ? Math.max(0, Math.round(Number(easycardBalance))) : tank.easycard_balance;
-  const newCash = cashBalance !== undefined ? Math.max(0, Math.round(Number(cashBalance))) : tank.cash_balance;
+  const curEasy = Number(tank.easycard_balance) || 0;
+  const curCash = Number(tank.cash_balance) || 0;
 
-  const diffEasy = newEasy - tank.easycard_balance;
-  const diffCash = newCash - tank.cash_balance;
+  let newEasy = curEasy;
+  let noteEasy = '3天定期盤點手動校正';
+  if (easycardBalance !== undefined && easycardBalance !== null && String(easycardBalance).trim() !== '') {
+    const strEasy = String(easycardBalance).trim();
+    const numEasy = Math.round(Number(strEasy));
+    if (Number.isFinite(numEasy)) {
+      if (numEasy < 0 || easycardMode === 'DELTA' || strEasy.startsWith('+')) {
+        newEasy = Math.max(0, curEasy + numEasy);
+        noteEasy = numEasy < 0 ? '自訂扣款消費' : '自訂加值存入';
+      } else {
+        newEasy = Math.max(0, numEasy);
+      }
+    }
+  }
+
+  let newCash = curCash;
+  let noteCash = '3天定期盤點手動校正';
+  if (cashBalance !== undefined && cashBalance !== null && String(cashBalance).trim() !== '') {
+    const strCash = String(cashBalance).trim();
+    const numCash = Math.round(Number(strCash));
+    if (Number.isFinite(numCash)) {
+      if (numCash < 0 || cashMode === 'DELTA' || strCash.startsWith('+')) {
+        newCash = Math.max(0, curCash + numCash);
+        noteCash = numCash < 0 ? '自訂扣款消費' : '自訂加值存入';
+      } else {
+        newCash = Math.max(0, numCash);
+      }
+    }
+  }
+
+  const diffEasy = newEasy - curEasy;
+  const diffCash = newCash - curCash;
 
   db.prepare(`
     UPDATE wallet_tank SET easycard_balance = ?, cash_balance = ?, last_audit_at = ?, updated_at = ? WHERE id = 1
@@ -2361,14 +2431,14 @@ function auditWalletTank(db, { easycardBalance, cashBalance }) {
   if (diffEasy !== 0) {
     db.prepare(`
       INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
-      VALUES ('EASYCARD', ?, ?, '3天定期盤點手動校正', NULL, ?)
-    `).run(diffEasy, newEasy, nowIso);
+      VALUES ('EASYCARD', ?, ?, ?, NULL, ?)
+    `).run(diffEasy, newEasy, noteEasy, nowIso);
   }
   if (diffCash !== 0) {
     db.prepare(`
       INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
-      VALUES ('CASH', ?, ?, '3天定期盤點手動校正', NULL, ?)
-    `).run(diffCash, newCash, nowIso);
+      VALUES ('CASH', ?, ?, ?, NULL, ?)
+    `).run(diffCash, newCash, noteCash, nowIso);
   }
 
   return getWalletTankStatus(db, nowIso);
@@ -3158,6 +3228,27 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
   }
 
   // 3. 薪資設定與跨專案班表全自動同步 (支援 shift-pay-app 即時自動推送、外部目錄自動掃描、或手動微調)
+  if ((method === 'GET' || method === 'POST') && pathname === '/api/shift/state') {
+    const survival = getSurvivalDashboardMetrics(db);
+    const rawPayload = survival.cycle.rawShiftPayload || null;
+    const fullState = rawPayload?.fullState || null;
+    const hasShiftData = Boolean(
+      (fullState?.shifts && Object.keys(fullState.shifts).length > 0) ||
+      (rawPayload && Number(rawPayload.totalPay) > 0)
+    );
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        hasShiftData,
+        fullState,
+        shiftSummary: rawPayload,
+        hourlyWage: survival.cycle.hourlyWage,
+        updatedAt: survival.cycle.lastSyncedAt
+      }
+    };
+  }
+
   if (method === 'POST' && (pathname === '/api/shift/sync' || pathname === '/api/shift/webhook')) {
     const cycle = syncCycleWithShiftData(db, {
       rawJsonPayload: body.rawJsonPayload || body.shiftState || body.payload || null,
