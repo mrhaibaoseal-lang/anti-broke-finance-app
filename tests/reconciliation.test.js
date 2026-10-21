@@ -734,3 +734,70 @@ test('15. 雲端支出上限警示防誤判與交易刪除水庫自動回滾：G
   assert.ok(rollbackLog.note.includes('刪除交易扣回水庫'));
 });
 
+test('16. 銀行轉帳與刷卡嚴格分離：轉帳轉出即時扣款結算不圈存、他人轉帳存入直接加預算、ATM提款精準入水庫', () => {
+  const db = setupTestDb();
+  const initTank = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
+  const startCash = Number(initTank.cash_balance) || 0;
+
+  // 1. 測試轉帳轉出 $20 (例如轉給朋友)
+  const transferOut = processBankNotification(
+    db,
+    '【玉山銀行】台幣帳戶金額異動~提台幣20元',
+    { timestamp: '2026-10-22T08:00:00.000Z', referenceDate: '2026-10-22' }
+  );
+  assert.equal(transferOut.resultType, 'TRANSFER_OUT_SETTLED');
+  assert.equal(transferOut.transaction.status, 'SETTLED'); // 轉帳轉出直接結算，絕非 PENDING
+  assert.equal(transferOut.transaction.is_reconciled_locked, 1);
+  assert.equal(transferOut.transaction.personal_amount, 20);
+  assert.equal(transferOut.transaction.category, '轉帳支出');
+  assert.ok(transferOut.transaction.reconcile_note.includes('💸 帳戶轉帳支出'));
+  assert.ok(!transferOut.transaction.reconcile_note.includes('信用卡刷卡'));
+  assert.ok(!transferOut.transaction.reconcile_note.includes('圈存'));
+
+  // 驗證水庫現金餘額完全未受轉帳影響
+  const tankAfterOut = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
+  assert.equal(Number(tankAfterOut.cash_balance), startCash);
+
+  // 2. 測試他人轉帳轉入 $500 (例如朋友還錢或他人轉帳)
+  const transferIn = processBankNotification(
+    db,
+    '【玉山銀行】台幣帳戶金額異動~存台幣500元',
+    { timestamp: '2026-10-22T08:30:00.000Z', referenceDate: '2026-10-22' }
+  );
+  assert.equal(transferIn.resultType, 'DEPOSIT_RECORDED');
+  assert.equal(transferIn.transaction.status, 'DEPOSIT');
+  assert.equal(transferIn.transaction.category, '轉帳入帳');
+  assert.equal(transferIn.transaction.personal_amount, 0); // 存入不扣預算
+  assert.equal(transferIn.transaction.effective_amount, 500);
+  assert.ok(transferIn.transaction.reconcile_note.includes('💸 帳戶轉帳存入'));
+  assert.ok(!transferIn.transaction.reconcile_note.includes('ATM'));
+
+  // 驗證他人轉帳存入不扣皮包現金
+  const tankAfterIn = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
+  assert.equal(Number(tankAfterIn.cash_balance), startCash);
+
+  // 3. 測試實體 ATM 提款 $1000 -> 結算並轉入皮包現金水庫
+  const atmWithdraw = processBankNotification(
+    db,
+    '【玉山銀行】ATM提款通知：您已於自動櫃員機提款新台幣 1000 元',
+    { timestamp: '2026-10-22T09:00:00.000Z', referenceDate: '2026-10-22' }
+  );
+  assert.equal(atmWithdraw.resultType, 'ATM_WITHDRAWAL_SETTLED');
+  assert.equal(atmWithdraw.transaction.status, 'SETTLED');
+  assert.equal(atmWithdraw.transaction.category, 'ATM提款');
+  assert.equal(atmWithdraw.transaction.personal_amount, 0);
+  const tankAfterWithdraw = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
+  assert.equal(Number(tankAfterWithdraw.cash_balance), startCash + 1000);
+
+  // 4. 測試正常信用卡刷卡 $50 -> 必須維持通道 A PENDING 圈存預扣
+  const cardAuth = processBankNotification(
+    db,
+    '【玉山銀行】信用卡消費通知：您於 7-ELEVEN 消費新台幣 50 元',
+    { timestamp: '2026-10-22T09:15:00.000Z', referenceDate: '2026-10-22' }
+  );
+  assert.equal(cardAuth.resultType, 'PENDING_CREATED');
+  assert.equal(cardAuth.transaction.status, 'PENDING');
+  assert.equal(cardAuth.transaction.personal_amount, 50);
+  assert.ok(cardAuth.transaction.reconcile_note.includes('信用卡刷卡'));
+});
+

@@ -319,7 +319,7 @@ function renderTransactionsList(transactions = []) {
           <div class="space-y-2 min-w-0">
             <div class="text-base font-semibold text-[#F5F5F7] truncate">${esc(tx.normalized_merchant)}</div>
             <div class="flex flex-wrap items-center gap-2">
-              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium badge-${tx.status}">${statusLabelOf(tx.status)}</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium badge-${tx.status}">${statusLabelOf(tx.status, tx)}</span>
               ${applePayBadge}
               ${lockBadge}
               ${fxBadge}
@@ -829,7 +829,7 @@ async function checkClipboardForBankNotification() {
     }
 
     if (clip.length > 1500) return;
-    const isSwipeNotif = /玉山|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|商店請款|薪資入帳|存款通知|存入通知|帳戶入帳|ATM|無卡存款|跨行存款|轉帳入帳/.test(clip)
+    const isSwipeNotif = /玉山|信用卡|簽帳金融卡|簽帳卡|消費通知|刷卡|帳戶扣款|商店請款|薪資入帳|存款通知|存入通知|帳戶入帳|帳戶金額異動|轉帳轉出|轉帳支出|轉帳入帳|轉帳存入|ATM|無卡存款|跨行存款/.test(clip)
       && /(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+|[0-9,]+\s*元/i.test(clip);
     if (!isSwipeNotif) return;
 

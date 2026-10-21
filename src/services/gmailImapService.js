@@ -143,7 +143,7 @@ function autoSyncCreditCardNotifications() {
   const props = PropertiesService.getScriptProperties();
   const syncedIds = JSON.parse(props.getProperty("SYNCED_MSG_IDS") || "[]");
   const syncedSet = new Set(syncedIds);
-  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 存款通知 OR 帳戶入帳 OR ATM存款 OR 薪資入帳)';
+  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 帳戶金額異動 OR 轉帳支出 OR 轉帳入帳 OR 存款通知 OR 帳戶入帳 OR ATM存款 OR 薪資入帳)';
   const threads = GmailApp.search(query, 0, 15);
   let newSynced = false;
 

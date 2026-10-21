@@ -250,7 +250,10 @@ function processBankNotification(db, rawText, options = {}) {
       };
     }
 
-    let depositNote = `🏧 金融卡存款自動入帳 +$${parsed.amount.toLocaleString()}（已直接計入本月可用預算池）${uidSuffix}`;
+    const isTransferIn = parsed.category === '轉帳入帳' || /轉帳|匯款/.test(parsed.normalizedMerchant);
+    let depositNote = isTransferIn
+      ? `💸 帳戶轉帳存入 +${parsed.amount.toLocaleString()}（已直接計入當月可用安全預算池）${uidSuffix}`
+      : `🏧 金融卡存款自動入帳 +${parsed.amount.toLocaleString()}（已直接計入當月可用預算池）${uidSuffix}`;
     if (options.deductFromWalletCash) {
       const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
       if (tank) {
@@ -329,6 +332,125 @@ function processBankNotification(db, rawText, options = {}) {
         parsed
       };
     }
+  }
+
+  // 情境 2.5：帳戶轉帳轉出 / 即時扣款（TRANSFER_OUT）-> 直接結算扣除可用安全預算，無圈存請款二階段！
+  if (parsed.channelType === 'TRANSFER_OUT') {
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
+    if (debounce.isDuplicate) {
+      const ignoreMsg = `🛡️ 防重複扣款鎖觸發：與既有「${parsed.normalizedMerchant} ${parsed.amount}」為同一筆轉帳通知，已自動忽略不重複扣款！${uidSuffix}`;
+      db.prepare(`
+        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
+      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+
+      return {
+        resultType: 'DEBOUNCE_IGNORED',
+        channelType: 'TRANSFER_OUT',
+        message: ignoreMsg,
+        originalTxId: debounce.originalTxId,
+        parsed
+      };
+    }
+
+    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+        .run(parsed.reportedAvailableBalance, nowIso);
+    }
+
+    const note = `💸 帳戶轉帳支出（已立即從當月可用安全預算扣除 ${parsed.amount.toLocaleString()}）${uidSuffix}`;
+    const insertRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'SETTLED', ?, ?, '轉帳支出', ?, ?, 0, ?, ?, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
+      parsed.amount, parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, parsed.authCode, note,
+      rawText, nowIso
+    );
+
+    const txId = Number(insertRes.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'TRANSFER_OUT', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, note, txId, rawText, nowIso);
+
+    return {
+      resultType: 'TRANSFER_OUT_SETTLED',
+      channelType: 'TRANSFER_OUT',
+      message: note,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+      parsed
+    };
+  }
+
+  // 情境 2.6：實體 ATM 提款（ATM_WITHDRAWAL）-> 結算並存入皮包水庫，不扣消費預算（待花現金時才扣）
+  if (parsed.channelType === 'ATM_WITHDRAWAL') {
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
+    if (debounce.isDuplicate) {
+      const ignoreMsg = `🛡️ 防重複鎖觸發：與既有「${parsed.normalizedMerchant} ${parsed.amount}」為同一筆提款通知，已自動忽略！${uidSuffix}`;
+      db.prepare(`
+        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
+      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+
+      return {
+        resultType: 'DEBOUNCE_IGNORED',
+        channelType: 'ATM_WITHDRAWAL',
+        message: ignoreMsg,
+        originalTxId: debounce.originalTxId,
+        parsed
+      };
+    }
+
+    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+        .run(parsed.reportedAvailableBalance, nowIso);
+    }
+
+    const note = `🏧 ATM提款 +${parsed.amount.toLocaleString()}（已自銀行帳戶轉入皮包現金水庫）${uidSuffix}`;
+    const insertRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'SETTLED', ?, ?, 'ATM提款', ?, ?, 0, ?, 0, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
+      parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, parsed.authCode, note,
+      rawText, nowIso
+    );
+
+    const txId = Number(insertRes.lastInsertRowid);
+    creditWalletTankFromTx(
+      db,
+      'CASH',
+      parsed.amount,
+      `ATM提款自動存入皮包現金：+${parsed.amount.toLocaleString()}`,
+      txId,
+      nowIso
+    );
+
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'ATM_WITHDRAWAL', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, note, txId, rawText, nowIso);
+
+    return {
+      resultType: 'ATM_WITHDRAWAL_SETTLED',
+      channelType: 'ATM_WITHDRAWAL',
+      message: note,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+      parsed
+    };
   }
 
   // 情境 3：通道 A（第 1 次通知：簽帳金融卡消費 / 授權圈存 / 信用卡刷卡）

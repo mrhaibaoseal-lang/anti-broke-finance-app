@@ -1407,8 +1407,14 @@ function normalizeMerchant(rawMerchant) {
   if (/玉山\s*ATM\s*現金存款|玉山\s*ATM\s*存款|ATM\s*現金存款|ATM\s*存款|ATM\s*存入|自動化設備存款|跨行存款/.test(s)) {
     return '玉山 ATM 存款';
   }
-  if (/玉山帳戶轉帳入帳|轉帳入帳|轉帳存入|匯款入帳/.test(s)) {
-    return '玉山帳戶轉帳入帳';
+  if (/玉山帳戶轉帳轉出|帳戶轉帳轉出|轉帳支出|帳戶金額異動[\s~]*提/.test(s)) {
+    return s.includes('(') ? s : '玉山帳戶轉帳轉出';
+  }
+  if (/玉山帳戶轉帳入帳|帳戶轉帳入帳|轉帳存入|帳戶金額異動[\s~]*存|匯款入帳/.test(s)) {
+    return s.includes('(') ? s : '玉山帳戶轉帳入帳';
+  }
+  if (/玉山\s*ATM\s*提款|自動櫃員機提款|ATM\s*提款/.test(s)) {
+    return '玉山 ATM 提款';
   }
   if (/玉山金融卡存款/.test(s)) {
     return '玉山金融卡存款';
@@ -1456,26 +1462,30 @@ function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText, c
   const isGasPreAuth = isGasStation && (amount === 1500 || amount === 2250);
 
   const isDeposit = channelType === 'DEPOSIT_IN' || channelType === 'SALARY_IN' || (
-    /ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯|轉帳入帳|轉帳存入|匯款入帳|收到轉帳/.test(combined) &&
-    !/提款|提領|刷退|取消授權|請款入帳|帳單請款/.test(combined)
+    /[台臺]幣帳戶金額異動[\s~]*存|帳戶金額異動[\s~]*存|ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯|轉帳入帳|轉帳存入|匯款入帳|收到轉帳/.test(combined) &&
+    !/[台臺]幣帳戶金額異動[\s~]*提|帳戶金額異動[\s~]*提|轉帳轉出|轉帳支出|提款|提領|刷退|取消授權|請款入帳|帳單請款/.test(combined)
   );
 
   let walletTankType = null;
-  if (!isDeposit) {
+  if (channelType === 'ATM_WITHDRAWAL') {
+    walletTankType = 'CASH';
+  } else if (!isDeposit && channelType !== 'TRANSFER_OUT') {
     if (/自動加值|悠遊卡|EASYCARD|全支付|IPASS\s*MONEY|一卡通MONEY|街口儲值/.test(combined)) {
       walletTankType = 'EASYCARD';
-    } else if (/ATM\s*提款|ATM\s*提領|提款|現金提領|跨行提款|無卡提款/.test(combined) || (/ATM/.test(combined) && !/存款|存入|入帳/.test(combined))) {
+    } else if (/(?:\bATM\b|自動櫃員機)\s*(?:提款|提領|現金提領|跨行提款|無卡提款)/.test(combined)) {
       walletTankType = 'CASH';
     }
   }
 
-  const isApplePay = !isDeposit && /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
-  const isForeignTx = !isDeposit && /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
+  const isApplePay = !isDeposit && channelType !== 'TRANSFER_OUT' && /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
+  const isForeignTx = !isDeposit && channelType !== 'TRANSFER_OUT' && /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
 
   let category = '一般消費';
   if (channelType === 'SALARY_IN' || /薪資入帳|薪水入帳|薪資轉帳/.test(combined)) category = '薪資入帳';
+  else if (channelType === 'TRANSFER_OUT' || /轉帳支出|轉帳轉出|帳戶金額異動[\s~]*提/.test(combined)) category = '轉帳支出';
+  else if (channelType === 'ATM_WITHDRAWAL' || (/ATM/.test(combined) && /提款|提領/.test(combined))) category = 'ATM提款';
   else if (isDeposit) {
-    if (/轉帳|匯款/.test(combined) && !/ATM|無卡存款|現金存/.test(combined)) category = '轉帳入帳';
+    if (/轉帳|匯款|[台臺]幣帳戶金額異動[\s~]*存/.test(combined) && !/ATM|無卡存款|現金存/.test(combined)) category = '轉帳入帳';
     else category = 'ATM存款';
   }
   else if (isVerifyAuth) category = '綁卡驗證';
@@ -1554,27 +1564,37 @@ function parseEsunNotification(rawText, options = {}) {
     .replace(/待(?:特約)?商店請款後(?:始進行)?扣款/g, '')
     .replace(/尚未請款|未請款/g, '');
 
-  // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > ATM存款/帳戶入帳 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
+  // 1. 判定通道類型 (優先順序：薪資入帳 > 刷退沖銷 > ATM提款 > 帳戶轉入/存款 > 帳戶轉出/扣款 > 通道 B 請款扣款 > 通道 A 刷卡授權圈存)
   let channelType = 'CHANNEL_A_AUTH';
   if (/薪資入帳|薪水入帳|薪資轉帳|薪轉入帳|發薪入帳|薪資發放/.test(textWithoutDisclaimer)) {
     channelType = 'SALARY_IN';
   } else if (/刷退|退貨|取消授權|解圈退回|沖銷入帳|退單|取消交易|退款/.test(textWithoutDisclaimer)) {
     channelType = 'REFUND';
+  } else if (/(?:\bATM\b|自動櫃員機|自動化設備)\s*(?:提款|提領|現金提領|跨行提款|無卡提款|自行提款)|無卡提款|跨行提款/.test(textWithoutDisclaimer)) {
+    channelType = 'ATM_WITHDRAWAL';
   } else if (
-    /ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯通知|轉帳入帳|轉帳存入|匯款入帳|收到轉帳|存入金額|存款金額|存入\s*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$|\d)/i.test(textWithoutDisclaimer) &&
-    !/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款|一般消費|刷卡消費|感應刷卡|提款|提領/.test(textWithoutDisclaimer)
+    /[台臺]幣帳戶金額異動[\s~]*存|帳戶金額異動[\s~]*存|ATM\s*存款|ATM\s*存入|ATM\s*現金存款|ATM\s*現金存入|自動化設備存款|無卡存款|跨行存款|現金存款|現金存入|存款通知|存入通知|帳戶入帳|臺幣帳戶入帳|台幣帳戶入帳|臺幣存匯通知|轉帳入帳|轉帳存入|匯款入帳|收到轉帳|存入金額|存款金額|他人轉入|存入\s*(?:NT\$|TWD|新[台臺]幣|[台臺]幣|\$|\d)/i.test(textWithoutDisclaimer) &&
+    !/[台臺]幣帳戶金額異動[\s~]*提|帳戶金額異動[\s~]*提|轉帳轉出|轉帳支出|帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款|一般消費|刷卡消費|感應刷卡|提款|提領/.test(textWithoutDisclaimer)
   ) {
     channelType = 'DEPOSIT_IN';
+  } else if (
+    /[台臺]幣帳戶金額異動[\s~]*提|帳戶金額異動[\s~]*提|轉帳轉出|轉帳支出|帳戶轉帳扣款|跨行轉帳轉出|網路銀行轉帳|行動銀行轉帳|轉帳付款|約定轉帳|非約定轉帳/.test(textWithoutDisclaimer) &&
+    !/信用卡|簽帳金融卡|簽帳卡|刷卡|授權|Apple\s*Pay|Google\s*Pay|感應刷卡|商店請款|特約商店/i.test(textWithoutDisclaimer)
+  ) {
+    channelType = 'TRANSFER_OUT';
   } else if (/帳戶扣款|簽帳卡消費扣款|簽帳金融卡請款|商店請款|請款扣款|實際請款扣款|實際扣款|請款入帳|帳單請款/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_B_SETTLE';
-  } else if (/信用卡|簽帳金融卡|簽帳卡|玉山卡|授權|刷卡|圈存|一般消費|消費通知|消費金額|特店名稱|新增消費/.test(textWithoutDisclaimer)) {
+  } else if (/信用卡|簽帳金融卡|簽帳卡|玉山卡|授權|刷卡|圈存|一般消費|消費通知|消費金額|特店名稱|新增消費|Apple\s*Pay|Google\s*Pay|感應刷卡/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_A_AUTH';
   } else if (/請款/.test(textWithoutDisclaimer)) {
     channelType = 'CHANNEL_B_SETTLE';
   }
 
   // 1.5 辨識卡別 (CREDIT 信用卡 vs DEBIT 簽帳金融卡) 與卡號末四碼
-  const cardType = /簽帳金融卡|簽帳卡|DEBIT|圈存|帳戶扣款/.test(cleanText) ? 'DEBIT' : 'CREDIT';
+  let cardType = null;
+  if (channelType === 'CHANNEL_A_AUTH' || channelType === 'CHANNEL_B_SETTLE') {
+    cardType = /簽帳金融卡|簽帳卡|DEBIT|圈存/.test(cleanText) ? 'DEBIT' : 'CREDIT';
+  }
   let cardLast4 = null;
   const last4Match = cleanText.match(/(?:末四碼|末4碼|卡號末四碼|卡號|\*)\s*([0-9]{4})(?!\d)/);
   if (last4Match) cardLast4 = last4Match[1];
@@ -1639,7 +1659,7 @@ function parseEsunNotification(rawText, options = {}) {
   if (authMatch) authCode = authMatch[1].toUpperCase();
 
   // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取結構化欄位或於/在...消費結構)
-  const headerIgnoreRegex = /玉山|銀行|信用卡|簽帳|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|入帳通知|^一般消費$|^Apple\s*Pay(?:\s*感應刷卡)?$|^Apple\s*錢包$/i;
+  const headerIgnoreRegex = /玉山|銀行|信用卡|簽帳|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|入帳通知|台幣帳戶金額異動|臺幣帳戶金額異動|帳戶金額異動|轉帳通知|轉帳支出|轉帳入帳|跨行轉帳|^一般消費$|^Apple\s*Pay(?:\s*感應刷卡)?$|^Apple\s*錢包$/i;
   let rawMerchant = '未知商店';
   const quoteMatches = [...cleanText.matchAll(/[「『]([^」』]+)[」』]/g)];
   for (const qm of quoteMatches) {
@@ -1667,17 +1687,24 @@ function parseEsunNotification(rawText, options = {}) {
       }
     }
   }
-  if (rawMerchant === '未知商店' && channelType === 'SALARY_IN') {
+  if (channelType === 'TRANSFER_OUT') {
+    let memo = null;
+    const memoMatch = cleanText.match(/(?:轉入帳號|受款帳號|轉入末|帳號末|受款人|轉給|備註)[：:\s]*([0-9A-Za-z\u4e00-\u9fa5]+)/i);
+    if (memoMatch && memoMatch[1]) memo = memoMatch[1].trim();
+    rawMerchant = memo ? `玉山帳戶轉帳轉出 (${memo})` : '玉山帳戶轉帳轉出';
+  } else if (channelType === 'ATM_WITHDRAWAL') {
+    rawMerchant = '玉山 ATM 提款';
+  } else if (channelType === 'SALARY_IN') {
     rawMerchant = '玉山薪資轉帳';
-  }
-  if (channelType === 'DEPOSIT_IN') {
-    if (/無卡存款/.test(cleanText)) {
+  } else if (channelType === 'DEPOSIT_IN') {
+    if (/[台臺]幣帳戶金額異動[\s~]*存|轉帳|匯款/.test(cleanText)) {
+      let sender = null;
+      const senderMatch = cleanText.match(/(?:轉入人|轉出人|匯款人|來自|由)[：:\s]*([0-9A-Za-z\u4e00-\u9fa5]+)/i);
+      if (senderMatch && senderMatch[1]) sender = senderMatch[1].trim();
+      rawMerchant = sender ? `玉山帳戶轉帳入帳 (${sender})` : '玉山帳戶轉帳入帳';
+    } else if (/無卡存款/.test(cleanText)) {
       rawMerchant = '玉山 ATM 無卡存款';
-    } else if (/ATM|自動化設備|現金存|跨行存款/i.test(cleanText)) {
-      rawMerchant = '玉山 ATM 存款';
-    } else if (/轉帳|匯款/.test(cleanText)) {
-      rawMerchant = '玉山帳戶轉帳入帳';
-    } else if (rawMerchant === '未知商店' || /存款通知|入帳通知|存入通知|臺幣帳戶|台幣帳戶/.test(rawMerchant)) {
+    } else {
       rawMerchant = '玉山 ATM 存款';
     }
   }
@@ -1984,7 +2011,10 @@ function processBankNotification(db, rawText, options = {}) {
       };
     }
 
-    let depositNote = `🏧 金融卡存款自動入帳 +$${parsed.amount.toLocaleString()}（已直接計入本月可用預算池）${uidSuffix}`;
+    const isTransferIn = parsed.category === '轉帳入帳' || /轉帳|匯款/.test(parsed.normalizedMerchant);
+    let depositNote = isTransferIn
+      ? `💸 帳戶轉帳存入 +${parsed.amount.toLocaleString()}（已直接計入當月可用安全預算池）${uidSuffix}`
+      : `🏧 金融卡存款自動入帳 +${parsed.amount.toLocaleString()}（已直接計入當月可用預算池）${uidSuffix}`;
     if (options.deductFromWalletCash) {
       const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
       if (tank) {
@@ -2063,6 +2093,125 @@ function processBankNotification(db, rawText, options = {}) {
         parsed
       };
     }
+  }
+
+  // 情境 2.5：帳戶轉帳轉出 / 即時扣款（TRANSFER_OUT）-> 直接結算扣除可用安全預算，無圈存請款二階段！
+  if (parsed.channelType === 'TRANSFER_OUT') {
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
+    if (debounce.isDuplicate) {
+      const ignoreMsg = `🛡️ 防重複扣款鎖觸發：與既有「${parsed.normalizedMerchant} ${parsed.amount}」為同一筆轉帳通知，已自動忽略不重複扣款！${uidSuffix}`;
+      db.prepare(`
+        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
+      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+
+      return {
+        resultType: 'DEBOUNCE_IGNORED',
+        channelType: 'TRANSFER_OUT',
+        message: ignoreMsg,
+        originalTxId: debounce.originalTxId,
+        parsed
+      };
+    }
+
+    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+        .run(parsed.reportedAvailableBalance, nowIso);
+    }
+
+    const note = `💸 帳戶轉帳支出（已立即從當月可用安全預算扣除 ${parsed.amount.toLocaleString()}）${uidSuffix}`;
+    const insertRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'SETTLED', ?, ?, '轉帳支出', ?, ?, 0, ?, ?, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
+      parsed.amount, parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, parsed.authCode, note,
+      rawText, nowIso
+    );
+
+    const txId = Number(insertRes.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'TRANSFER_OUT', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, note, txId, rawText, nowIso);
+
+    return {
+      resultType: 'TRANSFER_OUT_SETTLED',
+      channelType: 'TRANSFER_OUT',
+      message: note,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+      parsed
+    };
+  }
+
+  // 情境 2.6：實體 ATM 提款（ATM_WITHDRAWAL）-> 結算並存入皮包水庫，不扣消費預算（待花現金時才扣）
+  if (parsed.channelType === 'ATM_WITHDRAWAL') {
+    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
+    if (debounce.isDuplicate) {
+      const ignoreMsg = `🛡️ 防重複鎖觸發：與既有「${parsed.normalizedMerchant} ${parsed.amount}」為同一筆提款通知，已自動忽略！${uidSuffix}`;
+      db.prepare(`
+        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
+      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+
+      return {
+        resultType: 'DEBOUNCE_IGNORED',
+        channelType: 'ATM_WITHDRAWAL',
+        message: ignoreMsg,
+        originalTxId: debounce.originalTxId,
+        parsed
+      };
+    }
+
+    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+        .run(parsed.reportedAvailableBalance, nowIso);
+    }
+
+    const note = `🏧 ATM提款 +${parsed.amount.toLocaleString()}（已自銀行帳戶轉入皮包現金水庫）${uidSuffix}`;
+    const insertRes = db.prepare(`
+      INSERT INTO transactions (
+        cycle_key, status, raw_merchant, normalized_merchant, category,
+        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+        channel_a_raw, channel_b_raw, created_at
+      ) VALUES (?, 'SETTLED', ?, ?, 'ATM提款', ?, ?, 0, ?, 0, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
+    `).run(
+      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
+      parsed.amount, parsed.amount, parsed.amount,
+      parsed.txDate, nowIso, nowIso, parsed.authCode, note,
+      rawText, nowIso
+    );
+
+    const txId = Number(insertRes.lastInsertRowid);
+    creditWalletTankFromTx(
+      db,
+      'CASH',
+      parsed.amount,
+      `ATM提款自動存入皮包現金：+${parsed.amount.toLocaleString()}`,
+      txId,
+      nowIso
+    );
+
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'ATM_WITHDRAWAL', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, note, txId, rawText, nowIso);
+
+    return {
+      resultType: 'ATM_WITHDRAWAL_SETTLED',
+      channelType: 'ATM_WITHDRAWAL',
+      message: note,
+      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+      parsed
+    };
   }
 
   // 情境 3：通道 A（第 1 次通知：簽帳金融卡消費 / 授權圈存 / 信用卡刷卡）
@@ -3224,7 +3373,7 @@ function autoSyncCreditCardNotifications() {
   const props = PropertiesService.getScriptProperties();
   const syncedIds = JSON.parse(props.getProperty("SYNCED_MSG_IDS") || "[]");
   const syncedSet = new Set(syncedIds);
-  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 存款通知 OR 帳戶入帳 OR ATM存款 OR 薪資入帳)';
+  const query = 'newer_than:3d (玉山 OR esunbank OR 信用卡消費 OR 簽帳金融卡 OR 刷卡消費 OR 帳戶扣款 OR 帳戶金額異動 OR 轉帳支出 OR 轉帳入帳 OR 存款通知 OR 帳戶入帳 OR ATM存款 OR 薪資入帳)';
   const threads = GmailApp.search(query, 0, 15);
   let newSynced = false;
 
