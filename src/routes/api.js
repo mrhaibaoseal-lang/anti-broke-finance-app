@@ -163,9 +163,11 @@ function buildStructuredApplePayText(body = {}, searchParams = null) {
   if (merchant && rawAmt) {
     const numMatch = rawAmt.replace(/,/g, '').match(/(\d+)(?:\.\d+)?/);
     const cleanAmt = numMatch ? numMatch[1] : '0';
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const refDt = body.timestamp ? new Date(body.timestamp) : new Date();
+    const dateStr = body.referenceDate
+      ? String(body.referenceDate).slice(0, 10).replace(/-/g, '/')
+      : `${refDt.getFullYear()}/${String(refDt.getMonth() + 1).padStart(2, '0')}/${String(refDt.getDate()).padStart(2, '0')}`;
+    const timeStr = `${String(refDt.getHours()).padStart(2, '0')}:${String(refDt.getMinutes()).padStart(2, '0')}`;
     return `【Apple Pay 感應刷卡】您的 ${card} 於 ${dateStr} ${timeStr} 在「${merchant}」使用 Apple Pay 一般消費 NT$${cleanAmt} 元。`;
   }
 
