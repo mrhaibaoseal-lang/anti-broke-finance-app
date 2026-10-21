@@ -45,8 +45,8 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
     }
   }
 
-  // 進階跨管道防重（例如：手機推播先到、Gmail 通知信稍後收進來，具有相同 Email UID、相同刷卡時間 HH:mm 或相同授權碼 AuthCode）
-  if (parsed && (parsed.authCode || parsed.txTimeMinute || parsed.emailUid)) {
+  // 進階跨管道防重（例如：Apple Pay 感應秒級入帳後，玉山推播或 Gmail 信件幾分鐘後才收進來；或具有相同 Email UID / 刷卡時間 HH:mm / 授權碼 AuthCode）
+  if (parsed) {
     if (parsed.emailUid) {
       const logs = db.prepare('SELECT * FROM notification_logs ORDER BY id DESC LIMIT 100').all();
       const uidTag = `[UID:${parsed.emailUid}]`;
@@ -62,12 +62,22 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
     `).all();
     for (const tx of candidates) {
       if (tx.tx_date !== parsed.txDate || Number(tx.auth_amount) !== Number(parsed.amount)) continue;
-      if (tx.normalized_merchant !== parsed.normalizedMerchant) continue;
+      const sim = computeMerchantSimilarity(tx.normalized_merchant, parsed.normalizedMerchant);
+      if (sim < 0.7) continue;
+
       if (parsed.authCode && tx.auth_code && parsed.authCode === tx.auth_code) {
         return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_AUTH_CODE' };
       }
       if (parsed.txTimeMinute && tx.channel_a_raw && tx.channel_a_raw.includes(parsed.txTimeMinute)) {
         return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_TX_TIME_MINUTE' };
+      }
+      // Apple Pay + 銀行雙重通道 A 防重：若其中一筆為 Apple Pay 感應紀錄，且另一筆為 30 分鐘內的銀行同店同金額刷卡通知，自動視為同一筆消費不重複扣款
+      const existingIsApplePay = /APPLE\s*PAY|感應刷卡/i.test(`${tx.channel_a_raw || ''} ${tx.reconcile_note || ''}`);
+      if (existingIsApplePay !== Boolean(parsed.isApplePay)) {
+        const txTimeMs = new Date(tx.tx_timestamp || tx.created_at || nowIso).getTime();
+        if (Math.abs(nowMs - txTimeMs) <= 30 * 60 * 1000) {
+          return { isDuplicate: true, diffSeconds: Math.round(Math.abs(nowMs - txTimeMs) / 1000), originalTxId: tx.id, reason: 'APPLE_PAY_BANK_MERGED' };
+        }
       }
     }
   }
@@ -249,7 +259,9 @@ function processBankNotification(db, rawText, options = {}) {
 
     let status = 'PENDING';
     let personalAmount = parsed.amount;
-    const cardLabel = parsed.cardType === 'CREDIT' ? '信用卡刷卡' : '簽帳卡圈存';
+    const cardLabel = parsed.isApplePay
+      ? '🍎 Apple Pay 感應刷卡'
+      : (parsed.cardType === 'CREDIT' ? '信用卡刷卡' : '簽帳卡圈存');
     let reconcileNote = `${cardLabel}（已立即從當月可用安全預算精準扣除 $${parsed.amount}）${uidSuffix}`;
 
     if (parsed.isVerifyAuth) {

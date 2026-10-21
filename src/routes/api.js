@@ -132,6 +132,27 @@ function buildFullDashboardSnapshot(db) {
   };
 }
 
+function buildStructuredApplePayText(body = {}, searchParams = null) {
+  const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
+  const directText = body.text || body.rawText || body.message || body.notification || body.body || getParam('text') || getParam('message') || '';
+  const merchant = String(body.merchant || body.store || body.shop || body.name || getParam('merchant') || getParam('store') || getParam('name') || '').trim();
+  const rawAmt = String(body.amount ?? body.money ?? body.price ?? getParam('amount') ?? getParam('price') ?? '').trim();
+  const card = String(body.card || body.cardName || body.pass || getParam('card') || 'Apple Pay 綁定卡').trim();
+
+  if (merchant || rawAmt) {
+    const numMatch = rawAmt.replace(/,/g, '').match(/(\d+)(?:\.\d+)?/);
+    const cleanAmt = numMatch ? numMatch[1] : '0';
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    return `【Apple Pay 感應刷卡】您的 ${card} 於 ${dateStr} ${timeStr} 在「${merchant || 'Apple Pay 特約商店'}」使用 Apple Pay 一般消費 NT$${cleanAmt} 元。`;
+  }
+  if (directText && !/Apple\s*Pay/i.test(directText)) {
+    return `【Apple Pay 感應刷卡】${directText}`;
+  }
+  return directText;
+}
+
 async function handleApiRequest(method, pathname, body = {}, searchParams, options = {}) {
   const db = options.db || getDb();
 
@@ -144,7 +165,18 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     return { status: 200, data: { ok: true, ...buildFullDashboardSnapshot(db) } };
   }
 
-  // 1. 銀行與信用卡刷卡通知全自動接收與解析 (支援 iOS/Android 自動化推播 Webhook、Google Apps Script、Email MIME 與批次陣列)
+  // 1A. Apple Pay 感應刷卡專屬秒級自動入帳端點 (支援 iOS 捷徑「交易 Transaction」自動化 GET 網址參數或 POST JSON)
+  if ((method === 'GET' || method === 'POST') && pathname === '/api/notifications/apple-pay') {
+    const applePayText = buildStructuredApplePayText(body, searchParams);
+    const result = processBankNotification(db, applePayText, {
+      source: body.source || 'apple_pay_auto',
+      timestamp: body.timestamp || new Date().toISOString(),
+      referenceDate: body.referenceDate
+    });
+    return { status: 200, data: { ok: true, result, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  // 1B. 銀行與信用卡刷卡通知全自動接收與解析 (支援 iOS/Android 自動化推播 Webhook、Apple Pay、Google Apps Script、Email MIME 與批次陣列)
   if (method === 'POST' && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch')) {
     const source = pathname.endsWith('/webhook')
       ? (body.source || 'auto_webhook')
@@ -160,7 +192,7 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
         const itemObj = typeof item === 'string' ? { text: item } : (item || {});
         const text = itemObj.rawEmail
           ? decodeEmailMimeToText(itemObj.rawEmail)
-          : (itemObj.text || itemObj.rawText || itemObj.message || itemObj.notification || '');
+          : ((itemObj.merchant || itemObj.amount) ? buildStructuredApplePayText(itemObj) : (itemObj.text || itemObj.rawText || itemObj.message || itemObj.notification || ''));
         if (!String(text).trim()) continue;
         try {
           const r = processBankNotification(db, text, {
@@ -186,7 +218,9 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
 
     const rawText = body.rawEmail
       ? decodeEmailMimeToText(body.rawEmail)
-      : (body.text || body.rawText || body.message || body.notification || body.body || '');
+      : ((body.merchant || body.store || (body.amount && !body.text && !body.rawText))
+          ? buildStructuredApplePayText(body, searchParams)
+          : (body.text || body.rawText || body.message || body.notification || body.body || ''));
     const result = processBankNotification(db, rawText, {
       source,
       emailUid: body.emailUid || body.messageId || body.uid,

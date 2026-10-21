@@ -386,5 +386,52 @@ test('10. 薪資 App (shift-pay-app) 全自動無感連動：免手動貼 JSON �
   assert.equal(emptyAutoRes.data.cycle.hourly_wage, 210);
 });
 
+test('11. Apple Pay 感應刷卡秒級自動偵測：支援 iOS 錢包「交易」自動化 + 事後銀行通知防重 + 通道 B 請款核銷', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const db = setupTestDb();
+
+  // (1) 手機感應 Apple Pay 當下 1 秒觸發 /api/notifications/apple-pay (帶入 merchant 與 amount)
+  const applePayRes = await handleApiRequest('POST', '/api/notifications/apple-pay', {
+    merchant: '星巴克 STARBUCKS',
+    amount: 'NT$155',
+    card: '玉山 U Bear',
+    timestamp: '2026-10-21T07:00:00.000Z',
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(applePayRes.data.ok, true);
+  assert.equal(applePayRes.data.result.resultType, 'PENDING_CREATED');
+  assert.equal(applePayRes.data.result.parsed.isApplePay, true);
+  assert.equal(applePayRes.data.result.parsed.normalizedMerchant, '星巴克');
+  assert.equal(applePayRes.data.result.parsed.amount, 155);
+
+  // (2) 5 分鐘後收到玉山銀行發來的同筆消費授權通知信 -> 自動識別為剛才那筆 Apple Pay 刷卡，絕不重複扣款！
+  const bankAuthRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'gmail_imap_auto',
+    text: '【玉山銀行】您的玉山信用卡於 2026/10/21 在「悠旅生活(星巴克)」刷卡消費 NT$155 元。',
+    timestamp: '2026-10-21T07:05:00.000Z',
+    referenceDate: '2026-10-21'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(bankAuthRes.data.result.resultType, 'DEBOUNCE_IGNORED');
+
+  // (3) 兩天後收到銀行通道 B 請款扣款通知 -> 自動核銷該筆 Apple Pay 交易並上鎖
+  const bankSettleRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'gmail_imap_auto',
+    text: '【玉山銀行】帳戶扣款通知：2026/10/23 商店請款「星巴克」（原交易日 2026/10/21）實際扣款 NT$155 元。',
+    timestamp: '2026-10-23T03:00:00.000Z',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(bankSettleRes.data.result.resultType, 'RECONCILED_SETTLED');
+  assert.equal(bankSettleRes.data.result.transaction.id, applePayRes.data.result.transaction.id);
+
+  // 驗證總花費始終精準為 $155！
+  const metrics = getSurvivalDashboardMetrics(db, '2026-10-23');
+  assert.equal(metrics.budget.totalSpent, 155);
+  assert.equal(metrics.budget.settledSpent, 155);
+  assert.equal(metrics.budget.pendingSpent, 0);
+});
+
 
 

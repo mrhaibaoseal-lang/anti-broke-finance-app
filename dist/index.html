@@ -11,7 +11,7 @@
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261021v4" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261021v5" />
 </head>
 <body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -143,10 +143,10 @@
 
           <button type="button" id="btnHomeAutoSwipeCenter" class="btn-press rounded-2xl bg-indigo-600 text-white p-3 text-left space-y-1 shadow-xs">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold"><i class="fa-solid fa-satellite-dish mr-1"></i>刷卡自動偵測</span>
-              <span class="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-md">精準防重</span>
+              <span class="text-xs font-bold"><i class="fa-brands fa-apple mr-1"></i>Apple Pay / 刷卡偵測</span>
+              <span class="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-md">秒級入帳</span>
             </div>
-            <div class="text-[11px] text-indigo-100 leading-tight">自動攔截推播與 Gmail 刷卡信入帳</div>
+            <div class="text-[11px] text-indigo-100 leading-tight">Apple Pay 感應、推播與 Gmail 全自動扣款</div>
           </button>
         </div>
 
@@ -484,13 +484,13 @@
     </div>
   </div>
 
-  <!-- ==================== 彈窗 2：信用卡/簽帳卡 全自動刷卡偵測中心 Bottom Sheet ==================== -->
+  <!-- ==================== 彈窗 2：Apple Pay / 信用卡 / 簽帳卡 全自動刷卡偵測中心 Bottom Sheet ==================== -->
   <div id="modalNotifParser" class="fixed inset-0 z-50 hidden bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="sheet-panel bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-base font-bold text-slate-900">⚡ 信用卡・簽帳卡 全自動刷卡偵測</h3>
-          <p class="text-xs text-slate-400">免手動輸入 · 自動攔截刷卡推播與信件 · 絕不算錯扣款</p>
+          <h3 class="text-base font-bold text-slate-900">🍎 Apple Pay・信用卡 全自動偵測</h3>
+          <p class="text-xs text-slate-400">感應即刻入帳 · 自動攔截銀行推播與信件 · 絕不重複扣款</p>
         </div>
         <button data-close-modal="modalNotifParser" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
       </div>
@@ -501,21 +501,42 @@
             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             全自動偵測引擎運行中（每 15 秒即時同步）
           </span>
-          <span class="px-2 py-0.5 rounded-full bg-white text-indigo-700 font-semibold text-[10px] border border-indigo-200">1-to-1 防重複扣款</span>
+          <span class="px-2 py-0.5 rounded-full bg-white text-indigo-700 font-semibold text-[10px] border border-indigo-200">Apple Pay + 銀行防重</span>
+        </div>
+
+        <!-- 專屬 Apple Pay 感應刷卡秒級自動偵測卡片 -->
+        <div class="bg-slate-900 text-white rounded-2xl p-3.5 space-y-2.5 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-sm flex items-center gap-1.5">
+              <i class="fa-brands fa-apple text-base"></i> 方式 A：Apple Pay 感應「1 秒全自動記帳」
+            </span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">iOS 錢包原生觸發</span>
+          </div>
+          <p class="text-[11px] text-slate-300 leading-relaxed">
+            iPhone「捷徑 ➔ 自動化 ➔ <b>交易 (Transaction)</b>」勾選任一 Apple Pay 卡片（選<b>立即執行</b>），加入「取得 URL 內容」貼上下方專屬網址（帶入 <code class="text-emerald-300 font-mono">merchant=商家&amp;amount=金額</code>），<b>拿手機感應刷卡瞬間 1 秒自動入帳！</b>且事後收到玉山銀行通知信會自動合併、絕不重複扣款！
+          </p>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btnCopyApplePayUrl" class="btn-press py-2 px-2.5 rounded-xl bg-white text-slate-900 font-bold text-xs flex items-center justify-center gap-1">
+              <i class="fa-brands fa-apple"></i> 複製 Apple Pay 網址
+            </button>
+            <button type="button" id="btnSimulateApplePay" class="btn-press py-2 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
+              ⚡ 模擬 Apple Pay 刷卡
+            </button>
+          </div>
         </div>
 
         <div class="bg-white rounded-xl p-3 border border-indigo-100 space-y-2">
-          <div class="font-semibold text-slate-800">📱 方式 A：手機刷卡推播「秒級全自動入帳」（免開 App）</div>
+          <div class="font-semibold text-slate-800">📱 方式 B：銀行推播 / 簡訊「全自動攔截入帳」</div>
           <p class="text-[11px] text-slate-500 leading-relaxed">
-            iPhone「捷徑 ➔ 自動化」設定<b>收到「玉山 Wallet / 信用卡 / 簡訊 / 郵件」通知時</b>自動發送 <code class="text-indigo-600 font-mono">POST {"text":"通知內容"}</code>，刷卡 1 秒自動精準扣款！
+            收到「玉山 Wallet / 信用卡 / 簡訊」推播時自動發送 <code class="text-indigo-600 font-mono">POST {"text":"通知內容"}</code>：
           </p>
           <button type="button" id="btnCopyWebhookUrl" class="btn-press w-full py-2 rounded-xl bg-indigo-600 text-white font-semibold text-xs">
-            📋 一鍵複製自動入帳 Webhook 網址
+            📋 一鍵複製通用推播 Webhook 網址
           </button>
         </div>
 
         <div class="bg-white rounded-xl p-3 border border-indigo-100 space-y-2">
-          <div class="font-semibold text-slate-800">☁️ 方式 B：Gmail 刷卡通知信 24h 全自動掃描</div>
+          <div class="font-semibold text-slate-800">☁️ 方式 C：Gmail 刷卡通知信 24h 全自動掃描</div>
           <div class="grid grid-cols-2 gap-2">
             <button type="button" id="btnPollGmailNow" class="btn-press py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs">
               🔄 立即掃描 Gmail 刷卡信
@@ -528,7 +549,7 @@
 
         <label class="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-indigo-100 cursor-pointer">
           <div>
-            <div class="font-semibold text-slate-800">📋 方式 C：智慧剪貼簿自動感應</div>
+            <div class="font-semibold text-slate-800">📋 方式 D：智慧剪貼簿自動感應</div>
             <div class="text-[10px] text-slate-400">複製刷卡通知後切回畫面，免貼上自動辨識入帳</div>
           </div>
           <input id="chkAutoClipboard" type="checkbox" checked class="w-4 h-4 accent-indigo-600" />
@@ -544,6 +565,7 @@
         </summary>
         <div class="mt-2.5 space-y-2.5">
           <div class="flex flex-wrap gap-1.5" id="presetButtonsWrap">
+            <button data-preset="apple_pay_tap" class="btn-press px-2.5 py-1 rounded-full bg-slate-900 text-white text-[11px] font-semibold">🍎 Apple Pay: 星巴克 $155</button>
             <button data-preset="credit_ubear" class="btn-press px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-medium">💳 信用卡: U Bear 麥當勞 $165</button>
             <button data-preset="maixiang_auth" class="btn-press px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium">🧃 A: 7-11 $10 圈存</button>
             <button data-preset="maixiang_settle" class="btn-press px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium">✅ B: 超商 $10 請款</button>
@@ -704,8 +726,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v4"></script>
-  <script src="/js/app.js?v=20261021v4"></script>
+  <script src="/js/browserEngine.js?v=20261021v5"></script>
+  <script src="/js/app.js?v=20261021v5"></script>
 </body>
 </html>
 

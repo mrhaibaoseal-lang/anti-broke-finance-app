@@ -149,7 +149,8 @@ function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
     walletTankType = 'CASH';
   }
 
-  const isForeignTx = /STEAM|NETFLIX|APPLE|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
+  const isApplePay = /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
+  const isForeignTx = /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
 
   let category = '一般消費';
   if (isVerifyAuth) category = '綁卡驗證';
@@ -159,11 +160,12 @@ function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
   else if (/7-ELEVEN|全家|萊爾富|OK超商|便利商店/.test(combined)) category = '超商小額';
   else if (/五十嵐|清心|迷客夏|可不可|麻古|茶湯會|得正|一沐日|星巴克|路易莎|飲料|咖啡|麥香/.test(combined)) category = '手搖飲品';
   else if (/優食|UBEREATS|FOODPANDA|富胖達|餐廳|美食|小吃|便當|火鍋|燒肉|麥當勞|肯德基|摩斯|壽司/.test(combined)) category = '餐飲外食';
-  else if (/STEAM|NETFLIX|SPOTIFY|APPLE|遊戲|娛樂|影城/.test(combined)) category = '數位娛樂';
+  else if (/STEAM|NETFLIX|SPOTIFY|APPLE\.COM|APP\s*STORE|ITUNES|遊戲|娛樂|影城/.test(combined)) category = '數位娛樂';
   else if (/蝦皮|MOMO|PCHOME|淘寶|COUPANG|網購/.test(combined)) category = '網購剁手';
 
   return {
     category,
+    isApplePay,
     isVerifyAuth,
     isGasStation,
     isGasPreAuth,
@@ -301,7 +303,7 @@ function parseEsunNotification(rawText, options = {}) {
   if (authMatch) authCode = authMatch[1].toUpperCase();
 
   // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取結構化欄位或於/在...消費結構)
-  const headerIgnoreRegex = /^(?:玉山銀行|玉山Wallet|玉山信用卡|玉山簽帳卡|簽帳金融卡|信用卡|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|一般消費)$/i;
+  const headerIgnoreRegex = /^(?:玉山銀行|玉山Wallet|玉山信用卡|玉山簽帳卡|簽帳金融卡|信用卡|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|一般消費|Apple\s*Pay|Apple\s*Pay\s*感應刷卡|Apple\s*錢包)$/i;
   let rawMerchant = '未知商店';
   const quoteMatches = [...cleanText.matchAll(/[「『]([^」』]+)[」』]/g)];
   for (const qm of quoteMatches) {
@@ -314,8 +316,8 @@ function parseEsunNotification(rawText, options = {}) {
 
   if (rawMerchant === '未知商店') {
     const merchantPatterns = [
-      /(?:特店名稱|商店名稱|特約商店|消費商店|請款商店|交易地點|消費地點|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費金額|刷卡金額|交易金額|實際請款|一般消費|消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣|\$|\d+元|$))/i,
-      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:一般消費|刷卡消費|刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣)/i,
+      /(?:特店名稱|商店名稱|特約商店|消費商店|請款商店|交易地點|消費地點|商家名稱|商家|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費金額|刷卡金額|交易金額|實際請款|一般消費|消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣|\$|\d+元|$))/i,
+      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:使用\s*Apple\s*Pay\s*)?(?:一般消費|刷卡消費|感應刷卡|刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣)/i,
       /【([^】]+)】/
     ];
     for (const pat of merchantPatterns) {

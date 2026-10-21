@@ -10,6 +10,10 @@ const fmtMoney = n => '$' + Number(n || 0).toLocaleString();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const NOTIFICATION_PRESETS = {
+  apple_pay_tap: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return `【Apple Pay 感應刷卡】您的 玉山銀行卡 於 ${today} 15:30 在「星巴克」使用 Apple Pay 一般消費 NT$155 元。`;
+  },
   credit_ubear: () => {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
     return `【消費通知】您的玉山Ｕ Bear信用卡(末四碼1234)於 ${today} 14:25 在「連加*麥當勞」一般消費 新臺幣 165.00 元，實際請款金額以帳單為準。`;
@@ -216,6 +220,11 @@ function renderTransactionsList(transactions = []) {
       ? `<span class="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[11px] font-medium">匯差 ${tx.fx_fee_diff > 0 ? '+' : ''}$${tx.fx_fee_diff}</span>`
       : '';
 
+    const isApplePayTx = /APPLE\s*PAY|感應刷卡/i.test(`${tx.channel_a_raw || ''} ${tx.reconcile_note || ''} ${tx.raw_merchant || ''}`);
+    const applePayBadge = isApplePayTx
+      ? `<span class="px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-semibold"><i class="fa-brands fa-apple mr-0.5"></i>Apple Pay</span>`
+      : '';
+
     const actions = [];
     if (tx.status === 'TEMP_HOLD') {
       actions.push(`<button data-gas-tx="${tx.id}" class="btn-press px-3 py-1.5 rounded-full bg-sky-600 text-white font-semibold text-xs">⛽ 輸入加油金額</button>`);
@@ -237,6 +246,7 @@ function renderTransactionsList(transactions = []) {
             <div class="text-base font-semibold text-slate-900 truncate">${esc(tx.normalized_merchant)}</div>
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="px-2 py-0.5 rounded-full text-[11px] font-medium badge-${tx.status}">${statusLabelOf(tx.status)}</span>
+              ${applePayBadge}
               ${lockBadge}
               ${fxBadge}
               <span class="text-xs text-slate-400 tabular-nums">${esc(tx.tx_date.slice(5))}</span>
@@ -981,6 +991,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       showAutoToast(res.imap.message);
     } finally {
       if (btn) btn.textContent = '🔄 立即掃描 Gmail 刷卡信';
+    }
+  });
+
+  $('#btnCopyApplePayUrl')?.addEventListener('click', async () => {
+    const base = window.location?.origin || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev';
+    const url = `${base}/api/notifications/apple-pay?merchant=商店名稱&amount=消費金額&card=ApplePay`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showAutoToast('🍎 已複製 Apple Pay 捷徑專屬網址！於 iOS「自動化 ➔ 交易」貼上即可感應秒入帳');
+    } catch (_) {
+      prompt('請複製以下 Apple Pay 自動入帳網址：', url);
+    }
+  });
+
+  $('#btnSimulateApplePay')?.addEventListener('click', async () => {
+    try {
+      const res = await apiCall('/api/notifications/apple-pay', 'POST', {
+        source: 'apple_pay_auto',
+        merchant: '星巴克 STARBUCKS',
+        amount: 155,
+        card: '玉山 U Bear (Apple Pay)'
+      });
+      const box = $('#notifResultBox');
+      if (box) {
+        box.classList.remove('hidden');
+        box.className = 'rounded-2xl p-3.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold';
+        box.textContent = `🍎【Apple Pay 自動入帳成功】${res.result.message}`;
+      }
+      renderDashboard(res.dashboard);
+      showAutoToast(`🍎 Apple Pay 感應入帳：${res.result.parsed?.normalizedMerchant} -$${res.result.parsed?.amount}`);
+    } catch (err) {
+      alert(err.message);
     }
   });
 

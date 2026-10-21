@@ -1222,7 +1222,8 @@ function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
     walletTankType = 'CASH';
   }
 
-  const isForeignTx = /STEAM|NETFLIX|APPLE|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
+  const isApplePay = /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包交易/.test(combined);
+  const isForeignTx = /STEAM|NETFLIX|APPLE\.COM|APP\s*STORE|ITUNES|SPOTIFY|GOOGLE|YOUTUBE|PLAYSTATION|NINTENDO|AMAZON|AGODA|BOOKING|AIRBNB|國外|海外|外幣|USD|JPY|EUR/.test(combined);
 
   let category = '一般消費';
   if (isVerifyAuth) category = '綁卡驗證';
@@ -1232,11 +1233,12 @@ function classifyTransaction(rawMerchant, normalizedMerchant, amount, rawText) {
   else if (/7-ELEVEN|全家|萊爾富|OK超商|便利商店/.test(combined)) category = '超商小額';
   else if (/五十嵐|清心|迷客夏|可不可|麻古|茶湯會|得正|一沐日|星巴克|路易莎|飲料|咖啡|麥香/.test(combined)) category = '手搖飲品';
   else if (/優食|UBEREATS|FOODPANDA|富胖達|餐廳|美食|小吃|便當|火鍋|燒肉|麥當勞|肯德基|摩斯|壽司/.test(combined)) category = '餐飲外食';
-  else if (/STEAM|NETFLIX|SPOTIFY|APPLE|遊戲|娛樂|影城/.test(combined)) category = '數位娛樂';
+  else if (/STEAM|NETFLIX|SPOTIFY|APPLE\.COM|APP\s*STORE|ITUNES|遊戲|娛樂|影城/.test(combined)) category = '數位娛樂';
   else if (/蝦皮|MOMO|PCHOME|淘寶|COUPANG|網購/.test(combined)) category = '網購剁手';
 
   return {
     category,
+    isApplePay,
     isVerifyAuth,
     isGasStation,
     isGasPreAuth,
@@ -1374,7 +1376,7 @@ function parseEsunNotification(rawText, options = {}) {
   if (authMatch) authCode = authMatch[1].toUpperCase();
 
   // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取結構化欄位或於/在...消費結構)
-  const headerIgnoreRegex = /^(?:玉山銀行|玉山Wallet|玉山信用卡|玉山簽帳卡|簽帳金融卡|信用卡|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|一般消費)$/i;
+  const headerIgnoreRegex = /^(?:玉山銀行|玉山Wallet|玉山信用卡|玉山簽帳卡|簽帳金融卡|信用卡|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|一般消費|Apple\s*Pay|Apple\s*Pay\s*感應刷卡|Apple\s*錢包)$/i;
   let rawMerchant = '未知商店';
   const quoteMatches = [...cleanText.matchAll(/[「『]([^」』]+)[」』]/g)];
   for (const qm of quoteMatches) {
@@ -1387,8 +1389,8 @@ function parseEsunNotification(rawText, options = {}) {
 
   if (rawMerchant === '未知商店') {
     const merchantPatterns = [
-      /(?:特店名稱|商店名稱|特約商店|消費商店|請款商店|交易地點|消費地點|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費金額|刷卡金額|交易金額|實際請款|一般消費|消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣|\$|\d+元|$))/i,
-      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:一般消費|刷卡消費|刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣)/i,
+      /(?:特店名稱|商店名稱|特約商店|消費商店|請款商店|交易地點|消費地點|商家名稱|商家|請款扣款|商店)[：:\s]*([^」】\n，,。；;（(]+?)(?:\s*(?:消費金額|刷卡金額|交易金額|實際請款|一般消費|消費|刷卡|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣|\$|\d+元|$))/i,
+      /(?:於|在)\s*(?:\d{4}[\/\-年]\d{1,2}[\/\-月]\d{1,2}日?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*(?:於|在)?\s*)?([^」】\n，,。；;（(]+?)\s*(?:使用\s*Apple\s*Pay\s*)?(?:一般消費|刷卡消費|感應刷卡|刷卡|消費|請款|扣款|授權|刷退|金額|NT\$|TWD|新[台臺]幣)/i,
       /【([^】]+)】/
     ];
     for (const pat of merchantPatterns) {
@@ -1485,8 +1487,8 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
     }
   }
 
-  // 進階跨管道防重（例如：手機推播先到、Gmail 通知信稍後收進來，具有相同 Email UID、相同刷卡時間 HH:mm 或相同授權碼 AuthCode）
-  if (parsed && (parsed.authCode || parsed.txTimeMinute || parsed.emailUid)) {
+  // 進階跨管道防重（例如：Apple Pay 感應秒級入帳後，玉山推播或 Gmail 信件幾分鐘後才收進來；或具有相同 Email UID / 刷卡時間 HH:mm / 授權碼 AuthCode）
+  if (parsed) {
     if (parsed.emailUid) {
       const logs = db.prepare('SELECT * FROM notification_logs ORDER BY id DESC LIMIT 100').all();
       const uidTag = `[UID:${parsed.emailUid}]`;
@@ -1502,12 +1504,22 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
     `).all();
     for (const tx of candidates) {
       if (tx.tx_date !== parsed.txDate || Number(tx.auth_amount) !== Number(parsed.amount)) continue;
-      if (tx.normalized_merchant !== parsed.normalizedMerchant) continue;
+      const sim = computeMerchantSimilarity(tx.normalized_merchant, parsed.normalizedMerchant);
+      if (sim < 0.7) continue;
+
       if (parsed.authCode && tx.auth_code && parsed.authCode === tx.auth_code) {
         return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_AUTH_CODE' };
       }
       if (parsed.txTimeMinute && tx.channel_a_raw && tx.channel_a_raw.includes(parsed.txTimeMinute)) {
         return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_TX_TIME_MINUTE' };
+      }
+      // Apple Pay + 銀行雙重通道 A 防重：若其中一筆為 Apple Pay 感應紀錄，且另一筆為 30 分鐘內的銀行同店同金額刷卡通知，自動視為同一筆消費不重複扣款
+      const existingIsApplePay = /APPLE\s*PAY|感應刷卡/i.test(`${tx.channel_a_raw || ''} ${tx.reconcile_note || ''}`);
+      if (existingIsApplePay !== Boolean(parsed.isApplePay)) {
+        const txTimeMs = new Date(tx.tx_timestamp || tx.created_at || nowIso).getTime();
+        if (Math.abs(nowMs - txTimeMs) <= 30 * 60 * 1000) {
+          return { isDuplicate: true, diffSeconds: Math.round(Math.abs(nowMs - txTimeMs) / 1000), originalTxId: tx.id, reason: 'APPLE_PAY_BANK_MERGED' };
+        }
       }
     }
   }
@@ -1689,7 +1701,9 @@ function processBankNotification(db, rawText, options = {}) {
 
     let status = 'PENDING';
     let personalAmount = parsed.amount;
-    const cardLabel = parsed.cardType === 'CREDIT' ? '信用卡刷卡' : '簽帳卡圈存';
+    const cardLabel = parsed.isApplePay
+      ? '🍎 Apple Pay 感應刷卡'
+      : (parsed.cardType === 'CREDIT' ? '信用卡刷卡' : '簽帳卡圈存');
     let reconcileNote = `${cardLabel}（已立即從當月可用安全預算精準扣除 $${parsed.amount}）${uidSuffix}`;
 
     if (parsed.isVerifyAuth) {
@@ -2927,6 +2941,27 @@ function buildFullDashboardSnapshot(db) {
   };
 }
 
+function buildStructuredApplePayText(body = {}, searchParams = null) {
+  const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
+  const directText = body.text || body.rawText || body.message || body.notification || body.body || getParam('text') || getParam('message') || '';
+  const merchant = String(body.merchant || body.store || body.shop || body.name || getParam('merchant') || getParam('store') || getParam('name') || '').trim();
+  const rawAmt = String(body.amount ?? body.money ?? body.price ?? getParam('amount') ?? getParam('price') ?? '').trim();
+  const card = String(body.card || body.cardName || body.pass || getParam('card') || 'Apple Pay 綁定卡').trim();
+
+  if (merchant || rawAmt) {
+    const numMatch = rawAmt.replace(/,/g, '').match(/(\d+)(?:\.\d+)?/);
+    const cleanAmt = numMatch ? numMatch[1] : '0';
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    return `【Apple Pay 感應刷卡】您的 ${card} 於 ${dateStr} ${timeStr} 在「${merchant || 'Apple Pay 特約商店'}」使用 Apple Pay 一般消費 NT$${cleanAmt} 元。`;
+  }
+  if (directText && !/Apple\s*Pay/i.test(directText)) {
+    return `【Apple Pay 感應刷卡】${directText}`;
+  }
+  return directText;
+}
+
 async function handleApiRequest(method, pathname, body = {}, searchParams, options = {}) {
   const db = options.db || getDb();
 
@@ -2939,7 +2974,18 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     return { status: 200, data: { ok: true, ...buildFullDashboardSnapshot(db) } };
   }
 
-  // 1. 銀行與信用卡刷卡通知全自動接收與解析 (支援 iOS/Android 自動化推播 Webhook、Google Apps Script、Email MIME 與批次陣列)
+  // 1A. Apple Pay 感應刷卡專屬秒級自動入帳端點 (支援 iOS 捷徑「交易 Transaction」自動化 GET 網址參數或 POST JSON)
+  if ((method === 'GET' || method === 'POST') && pathname === '/api/notifications/apple-pay') {
+    const applePayText = buildStructuredApplePayText(body, searchParams);
+    const result = processBankNotification(db, applePayText, {
+      source: body.source || 'apple_pay_auto',
+      timestamp: body.timestamp || new Date().toISOString(),
+      referenceDate: body.referenceDate
+    });
+    return { status: 200, data: { ok: true, result, dashboard: buildFullDashboardSnapshot(db) } };
+  }
+
+  // 1B. 銀行與信用卡刷卡通知全自動接收與解析 (支援 iOS/Android 自動化推播 Webhook、Apple Pay、Google Apps Script、Email MIME 與批次陣列)
   if (method === 'POST' && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch')) {
     const source = pathname.endsWith('/webhook')
       ? (body.source || 'auto_webhook')
@@ -2955,7 +3001,7 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
         const itemObj = typeof item === 'string' ? { text: item } : (item || {});
         const text = itemObj.rawEmail
           ? decodeEmailMimeToText(itemObj.rawEmail)
-          : (itemObj.text || itemObj.rawText || itemObj.message || itemObj.notification || '');
+          : ((itemObj.merchant || itemObj.amount) ? buildStructuredApplePayText(itemObj) : (itemObj.text || itemObj.rawText || itemObj.message || itemObj.notification || ''));
         if (!String(text).trim()) continue;
         try {
           const r = processBankNotification(db, text, {
@@ -2981,7 +3027,9 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
 
     const rawText = body.rawEmail
       ? decodeEmailMimeToText(body.rawEmail)
-      : (body.text || body.rawText || body.message || body.notification || body.body || '');
+      : ((body.merchant || body.store || (body.amount && !body.text && !body.rawText))
+          ? buildStructuredApplePayText(body, searchParams)
+          : (body.text || body.rawText || body.message || body.notification || body.body || ''));
     const result = processBankNotification(db, rawText, {
       source,
       emailUid: body.emailUid || body.messageId || body.uid,
