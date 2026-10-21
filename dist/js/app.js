@@ -177,7 +177,9 @@ function renderDashboard(state) {
   $('#metricFixed').textContent = '-' + fmtMoney(survival.budget.fixedAndInstallments);
   $('#metricSpent').textContent = fmtMoney(survival.budget.totalSpent);
   $('#metricRemaining').textContent = fmtMoney(survival.budget.remainingBudget);
-  $('#syncExpectedLabel').textContent = fmtMoney(survival.budget.remainingBudget);
+  if ($('#subCardRemainingVal')) $('#subCardRemainingVal').textContent = fmtMoney(survival.budget.cardRemainingBudget || 0);
+  if ($('#subCashRemainingVal')) $('#subCashRemainingVal').textContent = fmtMoney(survival.budget.cashBalance || 0);
+  if ($('#syncExpectedLabel')) $('#syncExpectedLabel').textContent = fmtMoney(survival.budget.cardRemainingBudget !== undefined ? survival.budget.cardRemainingBudget : survival.budget.remainingBudget);
 
   $('#shiftGrossVal').textContent = fmtMoney(survival.cycle.shiftGrossPay);
   $('#shiftWageVal').textContent = fmtMoney(survival.cycle.hourlyWage);

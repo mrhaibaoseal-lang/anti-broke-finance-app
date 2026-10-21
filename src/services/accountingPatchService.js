@@ -204,7 +204,7 @@ function syncEsunAvailableBalance(db, { actualEsunBalance, referenceDateStr }) {
   const nowIso = new Date().toISOString();
   const refDate = (referenceDateStr || nowIso.slice(0, 10)).slice(0, 10);
   const metrics = getSurvivalDashboardMetrics(db, refDate);
-  const systemExpected = Number(metrics.budget.remainingBudget);
+  const systemExpected = Number(metrics.budget.cardRemainingBudget !== undefined ? metrics.budget.cardRemainingBudget : metrics.budget.remainingBudget);
   const discrepancy = actual - systemExpected;
 
   let generatedGapTx = null;

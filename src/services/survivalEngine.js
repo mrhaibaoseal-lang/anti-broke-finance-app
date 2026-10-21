@@ -340,17 +340,24 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
   const daysElapsed = Math.max(1, Math.round((refMs - startMs) / 86400000) + 1);
   const daysRemaining = Math.max(1, Math.round((endMs - refMs) / 86400000) + 1);
 
+  // 讀取目前皮包現金與悠遊卡水庫餘額
+  const tankRow = db.prepare('SELECT cash_balance, easycard_balance FROM wallet_tank WHERE id = 1').get();
+  const cashBalance = Number(tankRow?.cash_balance) || 0;
+  const easycardBalance = Number(tankRow?.easycard_balance) || 0;
+
   const disposablePool = effectiveIncome - fixedAndInstallments;
-  const remainingBudget = disposablePool - totalSpent;
+  const cardRemainingBudget = disposablePool - totalSpent;
+  // 本月總剩餘可用額度（包含金融卡預算 ＋ 皮包現金餘額）
+  const remainingBudget = cardRemainingBudget + cashBalance;
   const dailySafeBudget = Math.floor(remainingBudget / daysRemaining);
-  const idealDailyBudget = Math.max(1, Math.floor(disposablePool / totalCycleDays));
+  const idealDailyBudget = Math.max(1, Math.floor((disposablePool + cashBalance) / totalCycleDays));
 
   const avgDailyBurnRate = Math.round(totalSpent / daysElapsed);
-  const isTodayOverspent = todaySpent > idealDailyBudget || (remainingBudget < disposablePool * (daysRemaining / totalCycleDays));
+  const isTodayOverspent = todaySpent > idealDailyBudget || (remainingBudget < (disposablePool + cashBalance) * (daysRemaining / totalCycleDays));
 
   let projectedBrokeDate = null, daysUntilBroke = null, overdraftDays = 0, bankruptcyWarningText = null;
   const effectiveBurnVelocity = Math.max(avgDailyBurnRate, todaySpent);
-  const isInitialZeroState = effectiveIncome === 0 && fixedAndInstallments === 0 && totalSpent === 0 && totalDeposited === 0;
+  const isInitialZeroState = effectiveIncome === 0 && fixedAndInstallments === 0 && totalSpent === 0 && totalDeposited === 0 && cashBalance === 0;
 
   if (!isInitialZeroState && remainingBudget <= 0) {
     daysUntilBroke = 0;
@@ -447,7 +454,10 @@ function getSurvivalDashboardMetrics(db, referenceDateStr) {
       effectiveIncome, fixedAndInstallments, disposablePool, totalSpent,
       totalDeposited, atmDeposited, depositCount, todayDeposited, cashSpent,
       pendingSpent: Number(spentRow.pending_spent) || 0, settledSpent: Number(spentRow.settled_spent) || 0,
-      gapSpent: Number(spentRow.gap_spent) || 0, todaySpent, remainingBudget, dailySafeBudget,
+      gapSpent: Number(spentRow.gap_spent) || 0, todaySpent,
+      cardRemainingBudget, cardRemaining: cardRemainingBudget,
+      cashBalance, easycardBalance,
+      remainingBudget, totalRemaining: remainingBudget, dailySafeBudget,
       idealDailyBudget, avgDailyBurnRate, isTodayOverspent: isInitialZeroState ? false : isTodayOverspent, overdraftDays,
       daysUntilBroke, projectedBrokeDate, bankruptcyWarningText
     },

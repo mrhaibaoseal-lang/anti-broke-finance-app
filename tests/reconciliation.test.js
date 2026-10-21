@@ -300,6 +300,7 @@ test('8. Cloudflare 無伺服器相容引擎 (PortableSqliteDb & 快照匯出入
 
 test('9. 信用卡與簽帳卡全自動偵測：免責聲明防誤判、小數點金額、可用餘額排除、跨管道(推播+Gmail MIME)絕不重複扣款', async () => {
   const { handleApiRequest } = require('../src/routes/api');
+  const { syncEsunAvailableBalance } = require('../src/services/accountingPatchService');
   const db = setupTestDb();
 
   // (A) 手機推播先到達：含「末四碼1234」、「165.00 元」、「可用餘額 15,800 元」與「實際請款金額以帳單為準」免責聲明
@@ -801,3 +802,58 @@ test('16. 銀行轉帳與刷卡嚴格分離：轉帳轉出即時扣款結算不�
   assert.ok(cardAuth.transaction.reconcile_note.includes('信用卡刷卡'));
 });
 
+
+test('17. 本月剩餘包含現金：驗證皮包現金即時計入本月總剩餘可用額度與每日安全預算，並與玉山金融卡餘額校正嚴格隔離', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const { syncEsunAvailableBalance } = require('../src/services/accountingPatchService');
+  const db = setupTestDb();
+  const nowIso = '2026-10-22T08:00:00.000Z';
+
+  // 1. 存入金融卡 $5,000，設定固定支出 $1,000 -> 金融卡純預算剩餘為 $4,000
+  db.prepare(`
+    INSERT INTO transactions (
+      cycle_key, status, raw_merchant, normalized_merchant, category,
+      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+      channel_a_raw, channel_b_raw, created_at
+    ) VALUES ('2026-10-10_2026-11-09', 'DEPOSIT', '玉山 ATM 存款', '玉山 ATM 存款', 'ATM存款', 5000, 5000, 0, 5000, 5000, '2026-10-22', ?, ?, NULL, 1, 100, 'ATM 存款', 0, 0, 'ATM', NULL, ?)
+  `).run(nowIso, nowIso, nowIso);
+
+  db.prepare(`
+    INSERT INTO fixed_expenses (name, monthly_amount, billing_day, is_active, created_at)
+    VALUES ('租屋補貼差額', 1000, 10, 1, ?)
+  `).run(nowIso);
+
+  // 2. 皮包現金設定為 $3,000
+  db.prepare('UPDATE wallet_tank SET cash_balance = 3000, updated_at = ? WHERE id = 1').run(nowIso);
+
+  const m1 = getSurvivalDashboardMetrics(db, '2026-10-22');
+  assert.equal(m1.budget.cardRemainingBudget, 4000); // 5000 - 1000
+  assert.equal(m1.budget.cashBalance, 3000);
+  // 本月總剩餘可用額度必須包含現金：4000 + 3000 = 7000
+  assert.equal(m1.budget.remainingBudget, 7000);
+  assert.equal(m1.budget.totalRemaining, 7000);
+  assert.equal(m1.budget.dailySafeBudget, Math.floor(7000 / m1.cycle.daysRemaining));
+
+  // 3. 登記現金消費 $200 (未勾選同步扣卡) -> 皮包現金變 $2,800，總剩餘降至 $6,800
+  await handleApiRequest('POST', '/api/cash/spend', {
+    itemName: '午餐三寶飯',
+    amount: 200,
+    category: '餐飲外食',
+    countInBudget: false,
+    referenceDateStr: '2026-10-22'
+  }, new URLSearchParams(), { db });
+
+  const m2 = getSurvivalDashboardMetrics(db, '2026-10-22');
+  assert.equal(m2.budget.cardRemainingBudget, 4000); // 金融卡預算不受影響
+  assert.equal(m2.budget.cashBalance, 2800);
+  assert.equal(m2.budget.remainingBudget, 6800); // 4000 + 2800 = 6800
+
+  // 4. 玉山銀行金融卡餘額校正：應精確比對金融卡額度 ($4,000)，不受皮包現金 ($2,800) 干擾
+  const syncRes = syncEsunAvailableBalance(db, {
+    actualEsunBalance: 4000,
+    referenceDateStr: '2026-10-22'
+  });
+  assert.equal(syncRes.discrepancyAmount, 0); // 完全吻合，無黑洞
+});
