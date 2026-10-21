@@ -4,7 +4,8 @@
   "description": "玉山簽帳卡雙重通知對帳引擎 × 班表動態薪資唯讀連動 × 防剁手守門員",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#090b10",
-  "theme_color": "#090b10",
+  "background_color": "#F8FAFC",
+  "theme_color": "#F8FAFC",
   "lang": "zh-Hant"
 }
+

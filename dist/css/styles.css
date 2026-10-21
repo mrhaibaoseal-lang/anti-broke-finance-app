@@ -1,29 +1,31 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  background-color: #090b10;
-  color: #f4f4f6;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* 深夜 (23:00~05:00) 與發薪日後 72h 高風險防禦模式紅黑警戒主題 */
+/* 深夜 (23:00~05:00) 與發薪日後 72h 高風險防禦模式：柔和玫瑰紅警戒氛圍 */
 body.high-risk-mode {
-  background-color: #140608;
-  background-image: radial-gradient(circle at 50% 0%, rgba(225, 29, 72, 0.18), transparent 60%);
+  background-color: #FFF5F7;
+  background-image: radial-gradient(circle at 50% 0%, rgba(244, 63, 94, 0.08), transparent 55%);
 }
 
-body.high-risk-mode .glass-card {
-  border-color: rgba(244, 63, 94, 0.32);
+body.high-risk-mode .bento-card {
+  border-color: rgba(244, 63, 94, 0.22);
 }
 
-.glass-card {
-  background: rgba(22, 25, 34, 0.86);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
+.bento-card {
+  background: #FFFFFF;
+  border: 1px solid #F1F5F9;
+  border-radius: 24px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03), 0 6px 16px -4px rgba(15, 23, 42, 0.04);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .tabular-nums {
@@ -31,90 +33,117 @@ body.high-risk-mode .glass-card {
 }
 
 .btn-press {
-  transition: transform 0.12s ease, opacity 0.12s ease, background-color 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-press:active {
-  transform: scale(0.96);
-  opacity: 0.9;
+  transform: scale(0.95);
 }
 
-/* 吃土等級發光邊框 */
+/* 吃土等級主卡邊框微光與語意強調 */
 .tier-glow-WEALTHY {
-  box-shadow: 0 0 28px -6px rgba(16, 185, 129, 0.35);
-  border-color: rgba(16, 185, 129, 0.45) !important;
+  border-color: #D1FAE5 !important;
+  box-shadow: 0 8px 24px -6px rgba(16, 185, 129, 0.12);
 }
 
 .tier-glow-NORMAL {
-  box-shadow: 0 0 28px -6px rgba(245, 158, 11, 0.35);
-  border-color: rgba(245, 158, 11, 0.45) !important;
+  border-color: #FEF3C7 !important;
+  box-shadow: 0 8px 24px -6px rgba(245, 158, 11, 0.12);
 }
 
 .tier-glow-BEGGAR_HERO {
-  box-shadow: 0 0 28px -6px rgba(249, 115, 22, 0.4);
-  border-color: rgba(249, 115, 22, 0.5) !important;
+  border-color: #FFEDD5 !important;
+  box-shadow: 0 8px 24px -6px rgba(249, 115, 22, 0.14);
 }
 
 .tier-glow-DIRT_EATING {
-  box-shadow: 0 0 32px -4px rgba(244, 63, 94, 0.5);
-  border-color: rgba(244, 63, 94, 0.65) !important;
-  animation: pulse-danger 2.2s infinite;
+  border-color: #FFE4E6 !important;
+  box-shadow: 0 8px 28px -6px rgba(244, 63, 94, 0.18);
 }
 
-@keyframes pulse-danger {
-  0%, 100% { box-shadow: 0 0 24px -4px rgba(244, 63, 94, 0.45); }
-  50% { box-shadow: 0 0 38px 2px rgba(244, 63, 94, 0.75); }
-}
-
-/* 交易狀態標籤 */
+/* 交易狀態膠囊標籤 (Pill Badges) */
 .badge-PENDING {
-  background: rgba(245, 158, 11, 0.18);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: #FFFBEB;
+  color: #B45309;
+  border: 1px solid #FDE68A;
 }
 
 .badge-SETTLED {
-  background: rgba(16, 185, 129, 0.18);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: #ECFDF5;
+  color: #047857;
+  border: 1px solid #A7F3D0;
 }
 
 .badge-TEMP_HOLD {
-  background: rgba(56, 189, 248, 0.18);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: #F0F9FF;
+  color: #0369A1;
+  border: 1px solid #BAE6FD;
 }
 
 .badge-CANCELED {
-  background: rgba(148, 163, 184, 0.16);
-  color: #94a3b8;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: #F1F5F9;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
 }
 
 .badge-AUTH_VERIFY {
-  background: rgba(168, 85, 247, 0.16);
-  color: #c084fc;
-  border: 1px solid rgba(168, 85, 247, 0.35);
+  background: #FAF5FF;
+  color: #6D28D9;
+  border: 1px solid #E9D5FF;
 }
 
 .badge-UNKNOWN_GAP {
-  background: rgba(244, 63, 94, 0.22);
-  color: #fb7185;
-  border: 1px solid rgba(244, 63, 94, 0.55);
+  background: #FFF1F2;
+  color: #BE123C;
+  border: 1px solid #FECDD3;
 }
 
-.input-dark {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  padding: 10px 14px;
-  color: #fff;
-  font-size: 15px;
+.input-dark,
+.input-fintech {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 11px 14px;
+  color: #0F172A;
+  font-size: 14px;
   outline: none;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition: all 0.2s ease;
 }
 
-.input-dark:focus {
-  border-color: #38bdf8;
-  background: rgba(56, 189, 248, 0.08);
+.input-dark::placeholder,
+.input-fintech::placeholder {
+  color: #94A3B8;
 }
+
+.input-dark:focus,
+.input-fintech:focus {
+  background: #FFFFFF;
+  border-color: #6366F1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+/* 隱藏滾動條但保留滑動功能 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Bottom Sheet 滑入動畫 */
+@keyframes sheetSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.sheet-panel {
+  animation: sheetSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
