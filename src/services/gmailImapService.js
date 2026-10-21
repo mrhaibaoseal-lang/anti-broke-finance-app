@@ -173,8 +173,56 @@ function autoSyncCreditCardNotifications() {
 }`;
 }
 
+function createUnifiedImapTransport(host, port, callbacks) {
+  if (tls && typeof tls.connect === 'function') {
+    const socket = tls.connect({ host, port, rejectUnauthorized: true });
+    socket.on('data', chunk => callbacks.onData(chunk.toString('utf8')));
+    socket.on('error', err => callbacks.onError(err));
+    return {
+      write(str) {
+        try { socket.write(str); } catch (_) {}
+      },
+      close() {
+        try { socket.end(); socket.destroy(); } catch (_) {}
+      }
+    };
+  }
+
+  if (typeof globalThis.__cfSocketConnect === 'function') {
+    const sock = globalThis.__cfSocketConnect({ hostname: host, port }, { secureTransport: 'on' });
+    const writer = sock.writable.getWriter();
+    const reader = sock.readable.getReader();
+    const decoder = new TextDecoder('utf-8');
+    const encoder = new TextEncoder();
+
+    (async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) callbacks.onData(decoder.decode(value, { stream: true }));
+        }
+      } catch (err) {
+        callbacks.onError(err);
+      }
+    })();
+
+    return {
+      write(str) {
+        writer.write(encoder.encode(str)).catch(() => {});
+      },
+      close() {
+        try { writer.close(); } catch (_) {}
+        try { sock.close(); } catch (_) {}
+      }
+    };
+  }
+
+  return null;
+}
+
 /**
- * 原生 TLS IMAP 玉山與信用卡通知信全自動掃描與對帳引擎 (免外部套件依賴)
+ * 原生 TLS / Cloudflare Sockets IMAP 玉山與信用卡通知信全自動掃描與對帳引擎
  */
 async function pollEsunEmailsViaImap(db) {
   const settings = db.prepare('SELECT gmail_user, gmail_app_password FROM user_settings WHERE id = 1').get();
@@ -184,17 +232,18 @@ async function pollEsunEmailsViaImap(db) {
       mode: 'NOT_CONFIGURED',
       processedCount: 0,
       newTransactions: [],
-      message: '尚未設定 Gmail 帳號與 16 碼應用程式密碼。您可填入設定開啟本機背景每分鐘自動掃描，或複製下方 Google Apps Script / iOS 捷徑開啟 24h 雲端全自動偵測。'
+      message: '請先輸入您的 Gmail 信箱與 16 碼 Google 應用程式密碼，系統即可每分鐘全自動抓取所有刷卡通知（含 Apple Pay、LINE Pay 與實體卡）！'
     };
   }
 
-  if (!tls || typeof tls.connect !== 'function') {
+  const hasTransport = (tls && typeof tls.connect === 'function') || (typeof globalThis.__cfSocketConnect === 'function');
+  if (!hasTransport) {
     return {
       ok: true,
       mode: 'CLOUD_WEBHOOK_READY',
       processedCount: 0,
       newTransactions: [],
-      message: '☁️ 目前運行於 Cloudflare 雲端環境，已就緒接收自動推播！請搭配「Google Apps Script 雲端自動轉發」或「手機刷卡推播自動化」即可 24 小時全自動入帳。'
+      message: '已儲存您的 Gmail 設定！'
     };
   }
 
@@ -202,127 +251,128 @@ async function pollEsunEmailsViaImap(db) {
 
   return new Promise(resolve => {
     try {
-      const socket = tls.connect({ host: 'imap.gmail.com', port: 993, rejectUnauthorized: true });
       let buffer = '';
       let step = 0;
       const processedResults = [];
+      let transport = null;
 
       const timeout = setTimeout(() => {
-        socket.destroy();
+        if (transport) transport.close();
         resolve({
           ok: false,
           mode: 'TIMEOUT',
           processedCount: processedResults.length,
           newTransactions: processedResults,
-          message: 'Gmail IMAP 連線逾時，請確認網路與 16 碼應用程式密碼。'
+          message: 'Gmail IMAP 連線逾時，請確認網路與 16 碼應用程式密碼是否正確。'
         });
       }, 12000);
 
-      socket.on('data', chunk => {
-        buffer += chunk.toString('utf8');
+      transport = createUnifiedImapTransport('imap.gmail.com', 993, {
+        onData(chunkStr) {
+          buffer += chunkStr;
 
-        if (step === 0 && /^\* OK/m.test(buffer)) {
-          step = 1;
-          buffer = '';
-          socket.write(`A1 LOGIN "${settings.gmail_user}" "${cleanPass}"\r\n`);
-        } else if (step === 1 && /^A1 (OK|NO|BAD)/m.test(buffer)) {
-          if (!/^A1 OK/m.test(buffer)) {
-            clearTimeout(timeout);
-            socket.write('A9 LOGOUT\r\n');
-            socket.end();
-            return resolve({
-              ok: false,
-              mode: 'AUTH_FAILED',
-              processedCount: 0,
-              newTransactions: [],
-              message: '❌ Gmail IMAP 登入失敗，請確認已開啟 Google 兩步驟驗證並填入 16 碼「應用程式密碼」。'
-            });
-          }
-          step = 2;
-          buffer = '';
-          socket.write('A2 SELECT INBOX\r\n');
-        } else if (step === 2 && /^A2 (OK|NO|BAD)/m.test(buffer)) {
-          step = 3;
-          buffer = '';
-          const sinceDt = new Date(Date.now() - 7 * 86400000);
-          socket.write(`A3 SEARCH SINCE ${formatImapDate(sinceDt)}\r\n`);
-        } else if (step === 3 && /^A3 (OK|NO|BAD)/m.test(buffer)) {
-          const searchMatch = buffer.match(/^\* SEARCH(?: (.+))?\r?$/m);
-          const seqNums = searchMatch && searchMatch[1]
-            ? searchMatch[1].trim().split(/\s+/).filter(Boolean).slice(-12)
-            : [];
+          if (step === 0 && /^\* OK/m.test(buffer)) {
+            step = 1;
+            buffer = '';
+            transport.write(`A1 LOGIN "${settings.gmail_user}" "${cleanPass}"\r\n`);
+          } else if (step === 1 && /^A1 (OK|NO|BAD)/m.test(buffer)) {
+            if (!/^A1 OK/m.test(buffer)) {
+              clearTimeout(timeout);
+              transport.write('A9 LOGOUT\r\n');
+              transport.close();
+              return resolve({
+                ok: false,
+                mode: 'AUTH_FAILED',
+                processedCount: 0,
+                newTransactions: [],
+                message: '❌ Gmail 登入失敗：請確認填寫的是 Google「16 碼應用程式密碼」（而非一般 Gmail 登入密碼）。'
+              });
+            }
+            step = 2;
+            buffer = '';
+            transport.write('A2 SELECT INBOX\r\n');
+          } else if (step === 2 && /^A2 (OK|NO|BAD)/m.test(buffer)) {
+            step = 3;
+            buffer = '';
+            const sinceDt = new Date(Date.now() - 7 * 86400000);
+            transport.write(`A3 SEARCH SINCE ${formatImapDate(sinceDt)}\r\n`);
+          } else if (step === 3 && /^A3 (OK|NO|BAD)/m.test(buffer)) {
+            const searchMatch = buffer.match(/^\* SEARCH(?: (.+))?\r?$/m);
+            const seqNums = searchMatch && searchMatch[1]
+              ? searchMatch[1].trim().split(/\s+/).filter(Boolean).slice(-12)
+              : [];
 
-          buffer = '';
-          if (seqNums.length === 0) {
+            buffer = '';
+            if (seqNums.length === 0) {
+              clearTimeout(timeout);
+              transport.write('A5 LOGOUT\r\n');
+              transport.close();
+              return resolve({
+                ok: true,
+                mode: 'IMAP_SYNCED',
+                processedCount: 0,
+                newTransactions: [],
+                message: '✅ Gmail 全自動連線成功！最近 7 天信箱內尚無新的刷卡通知信，之後每分鐘將自動在背景幫您抓信入帳！'
+              });
+            }
+
+            step = 4;
+            const fetchSet = seqNums.join(',');
+            transport.write(`A4 FETCH ${fetchSet} (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODY.PEEK[TEXT])\r\n`);
+          } else if (step === 4 && /^A4 (OK|NO|BAD)/m.test(buffer)) {
             clearTimeout(timeout);
-            socket.write('A5 LOGOUT\r\n');
-            socket.end();
-            return resolve({
+            const rawResponse = buffer;
+            buffer = '';
+            transport.write('A5 LOGOUT\r\n');
+            transport.close();
+
+            const msgBlocks = rawResponse.split(/^\* \d+ FETCH /m).slice(1);
+            for (const block of msgBlocks) {
+              const uidMatch = block.match(/UID\s+(\d+)/i);
+              const uid = uidMatch ? uidMatch[1] : null;
+              const decodedText = decodeEmailMimeToText(block);
+              if (!isBankTransactionEmailText(decodedText)) continue;
+
+              try {
+                const res = processBankNotification(db, decodedText, {
+                  source: 'gmail_imap_auto',
+                  emailUid: uid || undefined
+                });
+                if (res && res.resultType !== 'DEBOUNCE_IGNORED') {
+                  processedResults.push(res);
+                }
+              } catch (_) {}
+            }
+
+            resolve({
               ok: true,
               mode: 'IMAP_SYNCED',
-              processedCount: 0,
-              newTransactions: [],
-              message: '✅ 自動掃描完成：最近 7 天信箱內尚無新的刷卡或銀行通知信。'
+              processedCount: processedResults.length,
+              newTransactions: processedResults,
+              message: processedResults.length > 0
+                ? `⚡ 全自動偵測成功！已從 Gmail 自動抓取並寫入 ${processedResults.length} 筆最新刷卡/入帳紀錄！`
+                : '✅ Gmail 全自動連線成功！目前已同步所有刷卡通知，系統將在背景每分鐘自動抓信！'
             });
           }
-
-          step = 4;
-          const fetchSet = seqNums.join(',');
-          socket.write(`A4 FETCH ${fetchSet} (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODY.PEEK[TEXT])\r\n`);
-        } else if (step === 4 && /^A4 (OK|NO|BAD)/m.test(buffer)) {
+        },
+        onError(err) {
           clearTimeout(timeout);
-          const rawResponse = buffer;
-          buffer = '';
-          socket.write('A5 LOGOUT\r\n');
-          socket.end();
-
-          const msgBlocks = rawResponse.split(/^\* \d+ FETCH /m).slice(1);
-          for (const block of msgBlocks) {
-            const uidMatch = block.match(/UID\s+(\d+)/i);
-            const uid = uidMatch ? uidMatch[1] : null;
-            const decodedText = decodeEmailMimeToText(block);
-            if (!isBankTransactionEmailText(decodedText)) continue;
-
-            try {
-              const res = processBankNotification(db, decodedText, {
-                source: 'gmail_imap_auto',
-                emailUid: uid || undefined
-              });
-              if (res && res.resultType !== 'DEBOUNCE_IGNORED') {
-                processedResults.push(res);
-              }
-            } catch (_) {}
-          }
-
           resolve({
-            ok: true,
-            mode: 'IMAP_SYNCED',
-            processedCount: processedResults.length,
-            newTransactions: processedResults,
-            message: processedResults.length > 0
-              ? `⚡ 全自動偵測成功！已從 Gmail 自動抓取並寫入 ${processedResults.length} 筆最新刷卡/入帳紀錄！`
-              : '✅ Gmail 信箱自動掃描完成（所有刷卡通知皆已同步，無重複扣款）。'
+            ok: false,
+            mode: 'SOCKET_ERROR',
+            processedCount: 0,
+            newTransactions: [],
+            message: `連線異常 (${err?.message || 'Socket Error'})，請確認 Gmail 與 16 碼密碼。`
           });
         }
       });
-
-      socket.on('error', err => {
-        clearTimeout(timeout);
-        resolve({
-          ok: true,
-          mode: 'CLOUD_WEBHOOK_READY',
-          processedCount: 0,
-          newTransactions: [],
-          message: `☁️ 雲端模式已儲存設定 (${err.message})，請搭配 Google Apps Script 或手機推播自動化即時入帳！`
-        });
-      });
-    } catch (_) {
+    } catch (err) {
       resolve({
-        ok: true,
-        mode: 'CLOUD_WEBHOOK_READY',
+        ok: false,
+        mode: 'ERROR',
         processedCount: 0,
         newTransactions: [],
-        message: '☁️ 目前運行於雲端環境，請使用自動轉發腳本或手機推播自動化即時推送刷卡通知！'
+        message: `連線錯誤：${err?.message || '未知錯誤'}`
       });
     }
   });

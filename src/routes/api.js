@@ -178,6 +178,8 @@ function buildStructuredApplePayText(body = {}, searchParams = null) {
   return directText;
 }
 
+let lastDashboardImapPollMs = 0;
+
 async function handleApiRequest(method, pathname, body = {}, searchParams, options = {}) {
   const db = options.db || getDb();
 
@@ -185,6 +187,14 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     if (body && body.autoShiftState) {
       try {
         syncCycleWithShiftData(db, { rawJsonPayload: body.autoShiftState, isAutoSync: true });
+      } catch (_) {}
+    }
+    // 若已綁定 Gmail 帳號與 16 碼密碼，前端輪詢 Dashboard 時每 45 秒自動背景掃描一次信箱
+    const s = db.prepare('SELECT gmail_user, gmail_app_password FROM user_settings WHERE id = 1').get();
+    if (s && s.gmail_user && s.gmail_app_password && (Date.now() - lastDashboardImapPollMs > 45000)) {
+      lastDashboardImapPollMs = Date.now();
+      try {
+        await pollEsunEmailsViaImap(db);
       } catch (_) {}
     }
     return { status: 200, data: { ok: true, ...buildFullDashboardSnapshot(db) } };

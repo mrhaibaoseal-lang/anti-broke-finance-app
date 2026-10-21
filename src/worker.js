@@ -1,4 +1,7 @@
+import { connect } from 'cloudflare:sockets';
 import cloudState from './db/cloudState.js';
+
+globalThis.__cfSocketConnect = connect;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
