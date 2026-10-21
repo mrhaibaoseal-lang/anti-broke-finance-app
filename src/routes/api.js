@@ -132,33 +132,44 @@ function buildFullDashboardSnapshot(db) {
   };
 }
 
+function extractAnyBodyText(body = {}, searchParams = null) {
+  const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
+  let directText = body.text || body.rawText || body.message || body.notification || body.body || body.input || body.content || body.transaction || body[''] || getParam('text') || getParam('message') || getParam('input') || '';
+
+  if (body && typeof body === 'object') {
+    const extraVals = Object.entries(body)
+      .filter(([k, v]) => k !== '_clientState' && k !== 'source' && k !== 'timestamp' && k !== 'referenceDate' && k !== 'emailUid' && (typeof v === 'string' || typeof v === 'number'))
+      .map(([, v]) => String(v).trim())
+      .filter(Boolean);
+    if (extraVals.length > 0 && (!directText || extraVals.length > 1)) {
+      directText = extraVals.join(' ');
+    }
+  }
+
+  if (typeof directText === 'string' && /%[0-9A-Fa-f]{2}/.test(directText)) {
+    try {
+      directText = decodeURIComponent(directText.replace(/\+/g, ' '));
+    } catch (_) {}
+  }
+  return String(directText || '').trim();
+}
+
 function buildStructuredApplePayText(body = {}, searchParams = null) {
   const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
-  let directText = body.text || body.rawText || body.message || body.notification || body.body || body.input || body.transaction || body.交易 || body.捷徑輸入 || getParam('text') || getParam('message') || getParam('input') || '';
   const merchant = String(body.merchant || body.store || body.shop || body.name || body.商家 || body.商店 || body.名稱 || getParam('merchant') || getParam('store') || getParam('name') || '').trim();
   const rawAmt = String(body.amount ?? body.money ?? body.price ?? body.金額 ?? getParam('amount') ?? getParam('price') ?? '').trim();
   const card = String(body.card || body.cardName || body.pass || body.卡片 || body.票卡 || getParam('card') || 'Apple Pay 綁定卡').trim();
 
-  if (merchant || rawAmt) {
+  if (merchant && rawAmt) {
     const numMatch = rawAmt.replace(/,/g, '').match(/(\d+)(?:\.\d+)?/);
     const cleanAmt = numMatch ? numMatch[1] : '0';
     const now = new Date();
     const dateStr = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    return `【Apple Pay 感應刷卡】您的 ${card} 於 ${dateStr} ${timeStr} 在「${merchant || 'Apple Pay 特約商店'}」使用 Apple Pay 一般消費 NT$${cleanAmt} 元。`;
+    return `【Apple Pay 感應刷卡】您的 ${card} 於 ${dateStr} ${timeStr} 在「${merchant}」使用 Apple Pay 一般消費 NT$${cleanAmt} 元。`;
   }
 
-  // 若 iOS AI 捷徑自動產生了其他自訂 JSON 欄位名稱，自動將所有文字/數值欄位合併解析
-  if (!directText && body && typeof body === 'object') {
-    const vals = Object.entries(body)
-      .filter(([k, v]) => k !== '_clientState' && k !== 'source' && k !== 'timestamp' && k !== 'referenceDate' && (typeof v === 'string' || typeof v === 'number'))
-      .map(([, v]) => String(v).trim())
-      .filter(Boolean);
-    if (vals.length > 0) {
-      directText = vals.join(' ');
-    }
-  }
-
+  const directText = extractAnyBodyText(body, searchParams);
   if (directText && !/Apple\s*Pay/i.test(directText)) {
     return `【Apple Pay 感應刷卡】${directText}`;
   }
@@ -188,8 +199,8 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     return { status: 200, data: { ok: true, result, dashboard: buildFullDashboardSnapshot(db) } };
   }
 
-  // 1B. 銀行與信用卡刷卡通知全自動接收與解析 (支援 iOS/Android 自動化推播 Webhook、Apple Pay、Google Apps Script、Email MIME 與批次陣列)
-  if (method === 'POST' && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch')) {
+  // 1B. 銀行與信用卡刷卡通知全自動接收與解析 (支援 GET/POST Webhook、Apple Pay、Google Apps Script、Email MIME 與批次陣列)
+  if ((method === 'GET' || method === 'POST') && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch')) {
     const source = pathname.endsWith('/webhook')
       ? (body.source || 'auto_webhook')
       : (pathname.endsWith('/batch') ? (body.source || 'auto_batch_webhook') : (body.source || 'manual_ui'));
@@ -204,7 +215,7 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
         const itemObj = typeof item === 'string' ? { text: item } : (item || {});
         const text = itemObj.rawEmail
           ? decodeEmailMimeToText(itemObj.rawEmail)
-          : ((itemObj.merchant || itemObj.amount) ? buildStructuredApplePayText(itemObj) : (itemObj.text || itemObj.rawText || itemObj.message || itemObj.notification || ''));
+          : ((itemObj.merchant && itemObj.amount) ? buildStructuredApplePayText(itemObj) : extractAnyBodyText(itemObj));
         if (!String(text).trim()) continue;
         try {
           const r = processBankNotification(db, text, {
@@ -230,9 +241,9 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
 
     const rawText = body.rawEmail
       ? decodeEmailMimeToText(body.rawEmail)
-      : ((body.merchant || body.store || (body.amount && !body.text && !body.rawText))
+      : ((body.merchant && body.amount)
           ? buildStructuredApplePayText(body, searchParams)
-          : (body.text || body.rawText || body.message || body.notification || body.body || ''));
+          : extractAnyBodyText(body, searchParams));
     const result = processBankNotification(db, rawText, {
       source,
       emailUid: body.emailUid || body.messageId || body.uid,

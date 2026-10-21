@@ -477,6 +477,9 @@ function renderSettingsSection(settings) {
   $('#setLaborDeduct').value = settings.labor_health_deduction;
   $('#setShiftPath').value = settings.shift_app_path;
   $('#setGmailUser').value = settings.gmail_user || '';
+  if ($('#modalGmailUser')) {
+    $('#modalGmailUser').value = settings.gmail_user || '';
+  }
 }
 
 function switchMainTab(target) {
@@ -1016,12 +1019,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  $('#btnSaveAndPollGmailModal')?.addEventListener('click', async () => {
+    const gmailUser = ($('#modalGmailUser')?.value || '').trim();
+    const gmailAppPassword = ($('#modalGmailPass')?.value || '').trim();
+    if (!gmailUser) {
+      return alert('請先輸入你的 Gmail 信箱帳號！');
+    }
+    const btn = $('#btnSaveAndPollGmailModal');
+    if (btn) btn.textContent = '⏳ 正在儲存並掃描 Gmail...';
+    try {
+      await apiCall('/api/settings', 'POST', {
+        gmailUser,
+        gmailAppPassword: gmailAppPassword || undefined
+      });
+      const res = await apiCall('/api/notifications/gmail-poll', 'POST', {});
+      renderDashboard(res.dashboard);
+      const box = $('#notifResultBox');
+      if (box) {
+        box.classList.remove('hidden');
+        box.className = 'rounded-2xl p-3.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold';
+        box.textContent = res.imap.message;
+      }
+      showAutoToast(res.imap.message);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      if (btn) btn.textContent = '⚡ 儲存 Gmail 並立即啟動每分鐘全自動抓信';
+    }
+  });
+
   $('#btnCopyApplePayUrl')?.addEventListener('click', async () => {
     const base = window.location?.origin || 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev';
-    const url = `${base}/api/notifications/apple-pay?merchant=商店名稱&amount=消費金額&card=ApplePay`;
+    const url = `${base}/api/notifications/apple-pay`;
     try {
       await navigator.clipboard.writeText(url);
-      showAutoToast('🍎 已複製 Apple Pay 捷徑專屬網址！於 iOS「自動化 ➔ 交易」貼上即可感應秒入帳');
+      showAutoToast('🍎 已複製 Apple Pay 專用網址！請於「取得 URL 內容」貼上並設為 POST');
     } catch (_) {
       prompt('請複製以下 Apple Pay 自動入帳網址：', url);
     }

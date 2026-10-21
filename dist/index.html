@@ -11,7 +11,7 @@
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261021v7" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261021v8" />
 </head>
 <body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -520,23 +520,23 @@
             <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">適用 Apple Pay</span>
           </div>
 
-          <div class="rounded-xl bg-white/10 p-2.5 space-y-1 text-[11px] text-slate-200 leading-relaxed border border-white/10">
-            <div><b>步驟 1</b>：點下方黃綠按鈕複製 <b>AI 提示詞</b>。</div>
-            <div><b>步驟 2</b>：打開 iPhone「<b>捷徑</b>」➔ 點底部中間「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 往下滑選「<b>交易 (Transaction)</b>」。</div>
-            <div><b>步驟 3</b>：勾選你的卡片，選「<b>立即執行</b>」➔ 點「<b>新增空白自動化</b>」。</div>
-            <div><b>步驟 4</b>：在跳出的「<b>描述捷徑</b>」AI 框直接貼上提示詞送出即完成！（或點右下角 ✕ 搜尋「取得 URL 內容」貼上網址）</div>
+          <div class="rounded-xl bg-white/10 p-2.5 space-y-1.5 text-[11px] text-slate-200 leading-relaxed border border-white/10">
+            <div class="font-bold text-amber-300">⚠️ 關鍵修正：看到「描述捷徑」畫面時，千萬不要打字給 AI！</div>
+            <div><b>步驟 1</b>：打開 iPhone「<b>捷徑</b>」➔ 點最下方中間「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 往下滑點「<b>交易 (Transaction)</b>」➔ 勾選卡片並選「<b>立即執行</b>」➔ 點「下一步」➔ 點「<b>新增空白自動化</b>」。</div>
+            <div><b>步驟 2（跳過 AI 框）</b>：看到你截圖的「描述捷徑」畫面時，<b>直接點畫面右上角的「編輯」</b>進入動作列表！</div>
+            <div><b>步驟 3</b>：點下方搜尋「<b>取得 URL 內容</b>」加入 ➔ 點藍色「URL」貼上下方複製的網址。</div>
+            <div><b>步驟 4（最重要！）</b>：點網址右邊的「<b>&gt;</b>」展開 ➔ 方法改「<b>POST</b>」➔ 點「<b>＋ 新增欄位</b>」選「<b>文字</b>」：<br/>
+              • 左邊「鍵」輸入：<code class="text-emerald-300">text</code><br/>
+              • 右邊「文字」：點鍵盤上方的「<b>捷徑輸入(交易)</b>」放入後，<b>務必再點一下那顆藍色氣泡</b>改選「<b>商家 (Merchant)</b>」；接著再放第 2 顆「<b>捷徑輸入(交易)</b>」氣泡，<b>點一下第 2 顆氣泡</b>改選「<b>金額 (Amount)</b>」➔ 按右上角完成！（※請勿按底部 ▶ 播放測試，實際刷卡才會帶入金額）
+            </div>
           </div>
 
-          <button type="button" id="btnCopyIosAiPrompt" class="btn-press w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> ✨ 1. 一鍵複製「方式 A：Apple Pay」捷徑 AI 提示詞
-          </button>
-
           <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="btnCopyApplePayUrl" class="btn-press py-2 px-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-semibold text-xs flex items-center justify-center gap-1">
-              <i class="fa-brands fa-apple"></i> 複製傳統網址
+            <button type="button" id="btnCopyApplePayUrl" class="btn-press py-2.5 px-2.5 rounded-xl bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1">
+              📋 1. 複製 Apple Pay 專用網址
             </button>
-            <button type="button" id="btnSimulateApplePay" class="btn-press py-2 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
-              ⚡ 模擬 Apple Pay 刷卡
+            <button type="button" id="btnSimulateApplePay" class="btn-press py-2.5 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
+              ⚡ 2. 模擬 Apple Pay 刷卡
             </button>
           </div>
         </div>
@@ -545,59 +545,65 @@
         <div class="bg-white rounded-2xl p-3.5 border border-indigo-200 space-y-2.5 shadow-xs">
           <div class="flex items-center justify-between">
             <span class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-              <i class="fa-solid fa-mobile-screen-button text-indigo-600"></i> 方式 B：實體卡 / LINE Pay / 網購（iOS 捷徑 AI 自動化）
+              <i class="fa-solid fa-mobile-screen-button text-indigo-600"></i> 方式 B：實體卡 / LINE Pay / 網購（收到簡訊或郵件自動入帳）
             </span>
             <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-semibold border border-indigo-200">適用所有刷卡</span>
           </div>
 
-          <div class="rounded-xl bg-slate-50 p-2.5 space-y-1 text-[11px] text-slate-600 leading-relaxed border border-slate-200/70">
-            <div class="font-bold text-indigo-900">💡 連實體卡、LINE Pay、街口也能用 iOS 捷徑 AI 全自動抓！</div>
-            <div><b>步驟 1</b>：點下方紫色按鈕複製「<b>方式 B 專用 AI 提示詞</b>」。</div>
-            <div><b>步驟 2</b>：打開 iPhone「<b>捷徑</b>」➔ 底部「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 選擇「<b>電子郵件 (Email)</b>」或「<b>訊息 (Message)</b>」。</div>
-            <div><b>步驟 3</b>：條件設定「標題或內容包含：<b>玉山</b> 或 <b>消費</b> 或 <b>刷卡</b>」，勾選「<b>立即執行</b>」➔ 點「<b>新增空白自動化</b>」。</div>
-            <div><b>步驟 4</b>：在跳出的「<b>描述捷徑</b>」AI 框貼上提示詞送出！以後只要收到刷卡簡訊或信件，手機就會在背景秒級自動扣款！</div>
-          </div>
-
-          <button type="button" id="btnCopyMethodBAiPrompt" class="btn-press w-full py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> ✨ 一鍵複製「方式 B：全通路刷卡通知」捷徑 AI 提示詞
-          </button>
-
-          <button type="button" id="btnCopyWebhookUrl" class="btn-press w-full py-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold text-xs">
-            📋 備用：僅複製通用 Webhook 網址
-          </button>
-        </div>
-
-        <!-- ==================== 方式 C：Gmail 24h 雲端全自動腳本 (Google Apps Script) ==================== -->
-        <div class="bg-white rounded-2xl p-3.5 border border-emerald-200 space-y-2.5 shadow-xs">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-              <i class="fa-solid fa-cloud-bolt text-emerald-600"></i> 方式 C：Gmail 刷卡通知信 24h 雲端全自動抓取
-            </span>
-            <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-semibold border border-emerald-200">免開手機/電腦</span>
-          </div>
-
-          <div class="rounded-xl bg-emerald-50/60 p-2.5 space-y-1 text-[11px] text-slate-700 leading-relaxed border border-emerald-200/70">
-            <div class="font-bold text-emerald-950">📖 複製雲端腳本後怎麼做？（只要設定 1 次，終身 24h 自動抓信）：</div>
-            <div><b>步驟 1</b>：點下方「<b>📋 1. 複製 24h 雲端自動腳本</b>」。</div>
-            <div><b>步驟 2</b>：點「<b>🌐 2. 開啟 Google 腳本頁</b>」（在瀏覽器登入你的 Gmail）➔ 點左上角「<b>＋ 新專案</b>」。</div>
-            <div><b>步驟 3</b>：把程式碼區原本的幾行字刪掉，<b>貼上剛剛複製的腳本</b>，按上方磁碟片「<b>💾 儲存專案</b>」。</div>
-            <div><b>步驟 4</b>：點左邊選單的「<b>⏰ 觸發條件（鬧鐘圖示）</b>」➔ 右下角「<b>＋ 新增觸發條件</b>」：<br/>
-              <span class="text-emerald-800">• 活動來源選「<b>時間驅動</b>」➔ 類型選「<b>分鐘計時器</b>」➔ 間隔選「<b>每分鐘</b>（或每 5 分鐘）」➔ 按儲存並允許 Google 授權即完成！</span>
+          <div class="rounded-xl bg-slate-50 p-2.5 space-y-1.5 text-[11px] text-slate-600 leading-relaxed border border-slate-200/70">
+            <div><b>步驟 1</b>：打開 iPhone「<b>捷徑</b>」➔ 底部「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 選「<b>訊息 (Message)</b>」或「<b>電子郵件 (Email)</b>」。</div>
+            <div><b>步驟 2</b>：點「<b>訊息包含（或主旨包含）</b>」輸入「<b>消費</b>」（或「<b>玉山</b>」），選「<b>立即執行</b>」➔「下一步」➔「<b>新增空白自動化</b>」。</div>
+            <div><b>步驟 3</b>：看到「描述捷徑」畫面時，<b>直接點右上角「編輯」</b> ➔ 搜尋加入「<b>取得 URL 內容</b>」➔ 貼上下方複製的網址。</div>
+            <div><b>步驟 4（最重要！）</b>：點網址右邊「<b>&gt;</b>」➔ 方法改「<b>POST</b>」➔ 點「<b>＋ 新增欄位（文字）</b>」：<br/>
+              • 左邊「鍵」輸入：<code class="text-indigo-600">text</code><br/>
+              • 右邊「文字」：點鍵盤上方的「<b>捷徑輸入</b>」放入後，<b>再點一下那顆藍色氣泡</b>，把屬性改選為「<b>內容 (Content)</b>」➔ 按完成！
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="btnCopyGasScript" class="btn-press py-2.5 px-2 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs">
-              📋 1. 複製 24h 雲端腳本
-            </button>
-            <a href="https://script.google.com/home/start" target="_blank" rel="noopener" class="btn-press py-2.5 px-2 rounded-xl bg-slate-900 text-white font-bold text-xs flex items-center justify-center gap-1 text-center">
-              🌐 2. 開啟 Google 腳本頁
-            </a>
+          <button type="button" id="btnCopyWebhookUrl" class="btn-press w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-xs shadow-xs">
+            📋 複製「方式 B」專用 Webhook 網址
+          </button>
+        </div>
+
+        <!-- ==================== 方式 C：Gmail 刷卡通知信全自動抓取 (支援直接綁定或雲端腳本) ==================== -->
+        <div class="bg-white rounded-2xl p-3.5 border border-emerald-200 space-y-2.5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+              <i class="fa-solid fa-envelope-circle-check text-emerald-600"></i> 方式 C：Gmail 刷卡通知信全自動抓取（免設捷徑！）
+            </span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-semibold border border-emerald-200">最簡單免捷徑</span>
           </div>
 
-          <button type="button" id="btnPollGmailNow" class="btn-press w-full py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs">
-            🔄 本機立即掃描一次 Gmail 刷卡信
-          </button>
+          <div class="space-y-2">
+            <div class="text-[11px] text-slate-600 leading-relaxed">
+              直接輸入你收玉山/信用卡通知信的 <b>Gmail 信箱</b> 與 <b>Google 16 碼應用程式密碼</b>（可點 <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" class="text-emerald-600 underline font-semibold">這裡向 Google 取得 16 碼密碼</a>），系統每分鐘就會自動幫你收信入帳：
+            </div>
+            <div class="grid grid-cols-1 gap-2">
+              <input id="modalGmailUser" type="email" class="input-fintech text-xs" placeholder="輸入你的 Gmail 信箱 (例: xxx@gmail.com)" />
+              <input id="modalGmailPass" type="password" class="input-fintech text-xs" placeholder="輸入 Google 16 碼應用程式密碼" />
+            </div>
+            <button type="button" id="btnSaveAndPollGmailModal" class="btn-press w-full py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-xs shadow-xs">
+              ⚡ 儲存 Gmail 並立即啟動每分鐘全自動抓信
+            </button>
+          </div>
+
+          <details class="rounded-xl bg-emerald-50/60 p-2.5 text-[11px] text-slate-700 border border-emerald-200/70">
+            <summary class="cursor-pointer font-bold text-emerald-950">☁️ 進階選用：用 Google Apps Script 雲端 24h 轉發（點此展開 4 步驟）</summary>
+            <div class="mt-2 space-y-1.5 leading-relaxed">
+              <div><b>步驟 1</b>：點下方「<b>📋 1. 複製 24h 雲端腳本</b>」。</div>
+              <div><b>步驟 2</b>：點「<b>🌐 2. 開啟 Google 腳本頁</b>」➔ 點左上角「<b>＋ 新專案</b>」。</div>
+              <div><b>步驟 3</b>：把畫面原本的 `function myFunction() {}` 刪掉，<b>貼上腳本</b>，按上方「<b>💾 儲存</b>」。</div>
+              <div><b>步驟 4</b>：點左邊「<b>⏰ 觸發條件（鬧鐘圖示）</b>」➔ 右下角「<b>＋ 新增觸發條件</b>」➔ 活動來源選「<b>時間驅動</b>」➔「<b>分鐘計時器</b>」➔「<b>每分鐘</b>」➔ 儲存並允許授權！</div>
+              <div class="grid grid-cols-2 gap-2 pt-1">
+                <button type="button" id="btnCopyGasScript" class="btn-press py-2 px-2 rounded-xl bg-emerald-700 text-white font-bold text-xs">
+                  📋 1. 複製 24h 雲端腳本
+                </button>
+                <a href="https://script.google.com/home/start" target="_blank" rel="noopener" class="btn-press py-2 px-2 rounded-xl bg-slate-900 text-white font-bold text-xs text-center">
+                  🌐 2. 開啟 Google 腳本頁
+                </a>
+              </div>
+            </div>
+          </details>
         </div>
 
         <label class="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-indigo-100 cursor-pointer">
@@ -779,8 +785,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v7"></script>
-  <script src="/js/app.js?v=20261021v7"></script>
+  <script src="/js/browserEngine.js?v=20261021v8"></script>
+  <script src="/js/app.js?v=20261021v8"></script>
 </body>
 </html>
 
