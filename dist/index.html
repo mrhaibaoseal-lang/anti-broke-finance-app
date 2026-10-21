@@ -11,7 +11,7 @@
   <title>防破產記帳｜極簡防剁手與玉山雙重通知對帳</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/styles.css?v=20261021v8" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261021v9" />
 </head>
 <body class="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -511,58 +511,37 @@
           • 系統內建<b>跨管道防重複扣款鎖</b>：同一筆消費就算同時被 A、B、C 抓到，也<b>只會扣款 1 次</b>！
         </div>
 
-        <!-- ==================== 方式 A：Apple Pay 感應刷卡 ==================== -->
+        <!-- ==================== 方式 A & B 合一：新版 iOS AI 捷徑「收到 App 通知自動轉發」 ==================== -->
         <div class="bg-slate-900 text-white rounded-2xl p-3.5 space-y-2.5 shadow-sm">
           <div class="flex items-center justify-between">
             <span class="font-bold text-sm flex items-center gap-1.5">
-              <i class="fa-brands fa-apple text-base"></i> 方式 A：Apple Pay 感應（1 秒入帳）
+              <i class="fa-solid fa-bell text-amber-400"></i> iOS 捷徑 AI 一句話全自動偵測（玉山 + Apple Pay）
             </span>
-            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">適用 Apple Pay</span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-400/30">實測可用</span>
           </div>
 
           <div class="rounded-xl bg-white/10 p-2.5 space-y-1.5 text-[11px] text-slate-200 leading-relaxed border border-white/10">
-            <div class="font-bold text-amber-300">⚠️ 關鍵修正：看到「描述捷徑」畫面時，千萬不要打字給 AI！</div>
-            <div><b>步驟 1</b>：打開 iPhone「<b>捷徑</b>」➔ 點最下方中間「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 往下滑點「<b>交易記錄</b>」（圖示是黑色錢包💳，非「交易」）➔ 勾選卡片並選「<b>立即執行</b>」➔ 點「下一步」➔ 點左上角「<b>建立新的捷徑</b>」（非舊版的新增空白自動化）。</div>
-            <div><b>步驟 2（跳過 AI 框）</b>：這時就會跳出你截圖的「新捷徑 / 描述捷徑」畫面，<b>直接點畫面右上角的「編輯」</b>進入動作列表！</div>
-            <div><b>步驟 3</b>：點下方搜尋「<b>取得 URL 內容</b>」加入 ➔ 點藍色「URL」貼上下方複製的網址。</div>
-            <div><b>步驟 4（最重要！）</b>：點網址右邊的「<b>&gt;</b>」展開 ➔ 方法改「<b>POST</b>」➔ 點「<b>＋ 新增欄位</b>」選「<b>文字</b>」：<br/>
-              • 左邊「鍵」輸入：<code class="text-emerald-300">text</code><br/>
-              • 右邊「文字」：點鍵盤上方的「<b>捷徑輸入(交易)</b>」放入後，<b>務必再點一下那顆藍色氣泡</b>改選「<b>商家 (Merchant)</b>」；接著再放第 2 顆「<b>捷徑輸入(交易)</b>」氣泡，<b>點一下第 2 顆氣泡</b>改選「<b>金額 (Amount)</b>」➔ 按右上角完成！（※請勿按底部 ▶ 播放測試，實際刷卡才會帶入金額）
+            <div><b>步驟 1</b>：打開 iPhone「<b>捷徑</b>」新增捷徑，在「<b>描述捷徑</b>」輸入框直接貼上下方這句提示詞：</div>
+            <div class="bg-black/40 rounded-lg p-2 font-mono text-[11px] text-amber-300 select-all">
+              當收到玉山銀行app時 發送給 https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/notifications/webhook
+            </div>
+            <div><b>步驟 2（把 Apple Pay / 玉山 Wallet 也加進同一個節點）</b>：<br/>
+              iOS 自動生成「<b>🔔 當我收到來自 [玉山銀行] [＋] 的通知時</b>」與「<b>取得 URL 內容 (POST JSON: body 內文 + title 標題)</b>」後，直接點「玉山銀行」右邊的 <b>[＋]</b>，把 <b>「錢包 (Apple Pay)」</b>、<b>「玉山 Wallet」</b>、<b>「LINE」</b> 一起勾起來，並確認「<b>自動化操作</b>」開關為綠色開啟即可！
             </div>
           </div>
+
+          <button type="button" id="btnCopyIosAiPrompt" class="btn-press w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs">
+            <i class="fa-solid fa-copy"></i> 📋 一鍵複製這句 iOS 捷徑提示詞
+          </button>
 
           <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="btnCopyApplePayUrl" class="btn-press py-2.5 px-2.5 rounded-xl bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1">
-              📋 1. 複製 Apple Pay 專用網址
+            <button type="button" id="btnCopyWebhookUrl" class="btn-press py-2 px-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-semibold text-xs flex items-center justify-center gap-1">
+              📋 僅複製 Webhook 網址
             </button>
-            <button type="button" id="btnSimulateApplePay" class="btn-press py-2.5 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
-              ⚡ 2. 模擬 Apple Pay 刷卡
+            <button type="button" id="btnSimulateApplePay" class="btn-press py-2 px-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1">
+              ⚡ 模擬通知轉發測試
             </button>
           </div>
-        </div>
-
-        <!-- ==================== 方式 B：實體卡 / LINE Pay / 簡訊與郵件捷徑自動化 ==================== -->
-        <div class="bg-white rounded-2xl p-3.5 border border-indigo-200 space-y-2.5 shadow-xs">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-              <i class="fa-solid fa-mobile-screen-button text-indigo-600"></i> 方式 B：實體卡 / LINE Pay / 網購（收到簡訊或郵件自動入帳）
-            </span>
-            <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-semibold border border-indigo-200">適用所有刷卡</span>
-          </div>
-
-          <div class="rounded-xl bg-slate-50 p-2.5 space-y-1.5 text-[11px] text-slate-600 leading-relaxed border border-slate-200/70">
-            <div><b>步驟 1</b>：打開 iPhone「<b>捷徑</b>」➔ 底部「<b>自動化</b>」➔ 右上角「<b>＋</b>」➔ 選「<b>訊息 (Message)</b>」或「<b>電子郵件 (Email)</b>」。</div>
-            <div><b>步驟 2</b>：點「<b>訊息包含（或主旨包含）</b>」輸入「<b>消費</b>」（或「<b>玉山</b>」），選「<b>立即執行</b>」➔「下一步」➔ 點左上角「<b>建立新的捷徑</b>」。</div>
-            <div><b>步驟 3</b>：看到「描述捷徑」畫面時，<b>直接點右上角「編輯」</b> ➔ 搜尋加入「<b>取得 URL 內容</b>」➔ 貼上下方複製的網址。</div>
-            <div><b>步驟 4（最重要！）</b>：點網址右邊「<b>&gt;</b>」➔ 方法改「<b>POST</b>」➔ 點「<b>＋ 新增欄位（文字）</b>」：<br/>
-              • 左邊「鍵」輸入：<code class="text-indigo-600">text</code><br/>
-              • 右邊「文字」：點鍵盤上方的「<b>捷徑輸入</b>」放入後，<b>再點一下那顆藍色氣泡</b>，把屬性改選為「<b>內容 (Content)</b>」➔ 按完成！
-            </div>
-          </div>
-
-          <button type="button" id="btnCopyWebhookUrl" class="btn-press w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-xs shadow-xs">
-            📋 複製「方式 B」專用 Webhook 網址
-          </button>
         </div>
 
         <!-- ==================== 方式 C：Gmail 刷卡通知信全自動抓取 (支援直接綁定或雲端腳本) ==================== -->
@@ -785,8 +764,8 @@
     </div>
   </div>
 
-  <script src="/js/browserEngine.js?v=20261021v8"></script>
-  <script src="/js/app.js?v=20261021v8"></script>
+  <script src="/js/browserEngine.js?v=20261021v9"></script>
+  <script src="/js/app.js?v=20261021v9"></script>
 </body>
 </html>
 

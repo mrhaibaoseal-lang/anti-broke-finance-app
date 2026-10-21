@@ -134,6 +134,15 @@ function buildFullDashboardSnapshot(db) {
 
 function extractAnyBodyText(body = {}, searchParams = null) {
   const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
+
+  // 優先處理新版 iOS 捷徑「當收到 App 通知時」自動生成的 { title: [標題], body: [內文] } 結構
+  if (body && typeof body === 'object' && (body.title !== undefined && body.body !== undefined)) {
+    const t = String(body.title || '').trim();
+    const b = String(body.body || '').trim();
+    if (t && b) return `【${t}】${b}`;
+    return b || t;
+  }
+
   let directText = body.text || body.rawText || body.message || body.notification || body.body || body.input || body.content || body.transaction || body[''] || getParam('text') || getParam('message') || getParam('input') || '';
 
   if (body && typeof body === 'object') {

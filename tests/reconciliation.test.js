@@ -441,6 +441,17 @@ test('11. Apple Pay 感應刷卡秒級自動偵測：支援 iOS 錢包「交易�
   assert.equal(iosAiRes.data.result.resultType, 'PENDING_CREATED');
   assert.equal(iosAiRes.data.result.parsed.normalizedMerchant, '麥當勞');
   assert.equal(iosAiRes.data.result.parsed.amount, 165);
+
+  // (5) 驗證使用者實測的新版 iOS「當我收到來自 玉山銀行 / 錢包 的通知時」自動產生的 { body: [內文], title: [標題] } JSON 格式
+  const iosNotifNodeRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    body: '2026/10/23 18:10 連加*全家便利商店 一般消費 NT$95 元',
+    title: '玉山銀行消費通知',
+    timestamp: '2026-10-23T18:10:00.000Z',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+  assert.equal(iosNotifNodeRes.data.result.resultType, 'PENDING_CREATED');
+  assert.equal(iosNotifNodeRes.data.result.parsed.normalizedMerchant, '全家便利商店');
+  assert.equal(iosNotifNodeRes.data.result.parsed.amount, 95);
 });
 
 

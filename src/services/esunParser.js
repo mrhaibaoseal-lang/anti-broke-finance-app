@@ -303,7 +303,7 @@ function parseEsunNotification(rawText, options = {}) {
   if (authMatch) authCode = authMatch[1].toUpperCase();
 
   // 5. 擷取原始商店名稱 (優先提取「...」引號內店名，再提取結構化欄位或於/在...消費結構)
-  const headerIgnoreRegex = /^(?:玉山銀行|玉山Wallet|玉山信用卡|玉山簽帳卡|簽帳金融卡|信用卡|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|一般消費|Apple\s*Pay|Apple\s*Pay\s*感應刷卡|Apple\s*錢包)$/i;
+  const headerIgnoreRegex = /玉山|銀行|信用卡|簽帳|消費通知|刷卡通知|授權通知|扣款通知|請款通知|帳戶扣款|薪資入帳|交易通知|入帳通知|^一般消費$|^Apple\s*Pay(?:\s*感應刷卡)?$|^Apple\s*錢包$/i;
   let rawMerchant = '未知商店';
   const quoteMatches = [...cleanText.matchAll(/[「『]([^」』]+)[」』]/g)];
   for (const qm of quoteMatches) {
