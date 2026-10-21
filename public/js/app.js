@@ -193,10 +193,10 @@ function renderDashboard(state) {
     $('#actualSalaryNote').textContent = `預估實領 $${Number(survival.cycle.estimatedNetPay || 0).toLocaleString()} (×${survival.cycle.netPayFactor})`;
   }
 
-  $('#todaySpentVal').textContent = fmtMoney(survival.budget.todaySpent);
-  $('#pendingSpentVal').textContent = fmtMoney(survival.budget.pendingSpent);
-  $('#settledSpentVal').textContent = fmtMoney(survival.budget.settledSpent);
-  $('#gapSpentVal').textContent = fmtMoney(survival.budget.gapSpent);
+  if ($('#todaySpentVal')) $('#todaySpentVal').textContent = fmtMoney(survival.budget.todaySpent);
+  if ($('#pendingSpentVal')) $('#pendingSpentVal').textContent = fmtMoney(survival.budget.pendingSpent);
+  if ($('#settledSpentVal')) $('#settledSpentVal').textContent = fmtMoney(survival.budget.settledSpent);
+  if ($('#gapSpentVal')) $('#gapSpentVal').textContent = fmtMoney(survival.budget.gapSpent);
   if ($('#cashSpentVal')) $('#cashSpentVal').textContent = fmtMoney(survival.budget.cashSpent || 0);
   if ($('#cardDepositedTotalVal')) $('#cardDepositedTotalVal').textContent = '+' + fmtMoney(survival.budget.totalDeposited || 0);
   if ($('#depositCountBadge')) $('#depositCountBadge').textContent = survival.budget.depositCount || 0;
@@ -381,10 +381,10 @@ function renderTransactionsList(transactions = []) {
 function renderCooldownSection(cooldownCart) {
   if (!cooldownCart) return;
   const ach = cooldownCart.achievement || {};
-  $('#achieveBadgeTitle').textContent = ach.badgeTitle || '🌱 防衝動覺醒者';
-  $('#savedTotalVal').textContent = fmtMoney(ach.totalSavedAmount || 0);
-  $('#savedHoursVal').textContent = ach.totalSavedHours || 0;
-  $('#savedCountVal').textContent = ach.abandonedCount || 0;
+  if ($('#achieveBadgeTitle')) $('#achieveBadgeTitle').textContent = ach.badgeTitle || '🌱 防衝動覺醒者';
+  if ($('#savedTotalVal')) $('#savedTotalVal').textContent = fmtMoney(ach.totalSavedAmount || 0);
+  if ($('#savedHoursVal')) $('#savedHoursVal').textContent = ach.totalSavedHours || 0;
+  if ($('#savedCountVal')) $('#savedCountVal').textContent = ach.abandonedCount || 0;
 
   const container = $('#cooldownListContainer');
   const list = [...(cooldownCart.activeItems || []), ...(cooldownCart.abandonedItems || [])];
@@ -492,11 +492,11 @@ function renderRadarSection(radar) {
     `).join('');
   }
 
-  $('#subAlertsWrap').innerHTML = (sub.subscriptionAlerts || []).map(a => `
+  if ($('#subAlertsWrap')) $('#subAlertsWrap').innerHTML = (sub.subscriptionAlerts || []).map(a => `
     <div class="rounded-xl bg-amber-500/12 border border-amber-500/25 px-4 py-3 text-xs font-medium text-amber-300">${esc(a)}</div>
   `).join('');
 
-  $('#futureSalaryBars').innerHTML = (sub.futureMonths || []).map(m => {
+  if ($('#futureSalaryBars')) $('#futureSalaryBars').innerHTML = (sub.futureMonths || []).map(m => {
     const pct = Math.min(100, Math.max(0, Number(m.preemptedPercent) || 0));
     return `
       <div class="apple-inset space-y-2.5">
