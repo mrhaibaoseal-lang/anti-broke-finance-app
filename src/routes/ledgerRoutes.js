@@ -32,6 +32,20 @@ function extractApplePayPayload(body = {}) {
     body.卡片 || body.票卡 || body.c || ''
   ).trim();
 
+  // 解析一鍵安裝捷徑 (guardpay-apple-pay.shortcut) 的結構化格式：「... | 金額:XXX | 商家:YYY | 卡片:ZZZ」
+  if (rawText && /金額:.*\|.*商家:/.test(rawText)) {
+    const amtTag = rawText.match(/金額:\s*([^|]*)/);
+    const merTag = rawText.match(/商家:\s*([^|]*)/);
+    const cardTag = rawText.match(/卡片:\s*([^|]*)/);
+    if (amtTag && amtTag[1].trim()) {
+      const numMatch = amtTag[1].match(/([0-9,]+(?:\.[0-9]+)?)/);
+      if (numMatch) amount = numMatch[1];
+    }
+    if (merTag && merTag[1].trim()) merchant = merTag[1].trim();
+    if (cardTag && cardTag[1].trim()) cardName = cardTag[1].trim();
+  }
+
+
   // 支援極簡速記格式，例如 ?q=155_星巴克 或 ?t=星巴克 155
   if (amount === null && !merchant && rawText) {
     const quickPair = rawText.match(/^\$?\s*([0-9,]+(?:\.[0-9]+)?)\s*[_,，\s/｜|-]+\s*(.+)$/) ||

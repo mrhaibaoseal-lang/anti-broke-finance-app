@@ -710,29 +710,22 @@
         <button type="button" data-close-modal="modalWebhookOcr" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center">✕</button>
       </div>
 
-      <!-- 通道 0：免設捷徑！iPhone App 內 1 秒極速記帳 -->
+      <!-- 通道 0：相簿 0 照片！App 內 1 秒極速記帳 (剪貼簿文字 / 常用商店點選) -->
       <div class="apple-inset space-y-3 text-xs border border-emerald-500/35 bg-emerald-500/[0.04]">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <span class="font-semibold text-sm text-emerald-300 flex items-center gap-2">
             <i class="fa-solid fa-bolt"></i>
-            <span>免設捷徑！App 內 1 秒極速記帳（最穩、0 失敗率）</span>
+            <span>相簿 0 照片殘留！1 秒極速記帳</span>
           </span>
-          <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold">✨ 推薦首選</span>
+          <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold">✨ 零照片殘留</span>
         </div>
         <p class="text-[#D1D5DB] leading-relaxed">
-          把本頁<b>「分享 ➔ 加入主畫面」</b>即可當成原生 iOS App 使用！不用設任何捷徑，直接選轉帳截圖辨識、一鍵貼上文字、或點選常用商家：
+          絕不在手機相簿留下任何截圖垃圾！可直接點下方<b>「一鍵貼上剪貼簿文字入帳」</b>（複製銀行通知或轉帳文字直接解析），或點選常用商家 1 秒記帳：
         </p>
-        <input id="inAppOcrImageInput" type="file" accept="image/*" class="hidden" />
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <button type="button" id="btnPickScreenshotOcr" class="btn-press py-3 px-3 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg">
-            <i class="fa-solid fa-camera-retro"></i>
-            <span id="lblPickScreenshotOcr">📸 直接選轉帳/刷卡截圖辨識</span>
-          </button>
-          <button type="button" id="btnPasteClipboardAuto" class="btn-press py-3 px-3 rounded-xl bg-[#0A84FF] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg">
-            <i class="fa-solid fa-paste"></i>
-            <span>📋 一鍵貼上剪貼簿文字入帳</span>
-          </button>
-        </div>
+        <button type="button" id="btnPasteClipboardAuto" class="btn-press w-full py-3 px-3 rounded-xl bg-[#0A84FF] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg">
+          <i class="fa-solid fa-paste"></i>
+          <span>📋 一鍵貼上剪貼簿文字自動入帳（相簿 0 照片）</span>
+        </button>
         <div class="space-y-2 pt-1">
           <div class="flex flex-wrap gap-1.5">
             <button type="button" data-quick-merchant="7-ELEVEN" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">🏪 7-11</button>
@@ -755,67 +748,70 @@
         </div>
       </div>
 
-      <!-- 通道 1：Apple Pay 零設定極簡版 (不用設 POST、不用設 JSON、不用打英文欄位！) -->
+      <!-- 通道 1：Apple Pay 自動入帳（一鍵匯入已簽章捷徑檔，免自己拉動作！） -->
       <div class="apple-inset space-y-3 text-xs border border-amber-500/25">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <span class="font-semibold text-sm text-[#F5F5F7] flex items-center gap-2">
             <i class="fa-brands fa-apple text-amber-400"></i>
-            <span>通道 1：Apple Pay 自動入帳（全新「零 JSON」10 秒設定版）</span>
+            <span>通道 1：Apple Pay 自動記帳（直接幫你包好捷徑，免手動拉動作）</span>
           </span>
           <a href="shortcuts://" class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[11px] font-semibold border border-amber-500/40">
-            🚀 直接打開「捷徑 App」
+            🚀 打開「捷徑 App」
           </a>
         </div>
-        <div class="text-xs text-[#D1D5DB] leading-relaxed">
-          現在<b>完全不用改 POST、不用選 JSON、也不用自己打 3 個英文欄位了！</b>維持預設 <code>GET</code> 貼上這條極簡網址即可：
-        </div>
-        <div class="bg-black/45 border border-white/[0.08] rounded-xl p-3 font-mono text-[11px] text-amber-300 select-all break-all leading-relaxed">
-          https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/q?a=<span class="bg-amber-500/25 text-white px-1 rounded">[點選：金額]</span>&amp;m=<span class="bg-sky-500/25 text-white px-1 rounded">[點選：商家]</span>
-        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <button type="button" id="btnCopyQuickZeroJsonUrl" class="btn-press btn-primary py-2.5 px-3 text-xs font-semibold">
-            📋 複製「零設定極簡網址」(/api/q?a=)
+          <a href="shortcuts://import-shortcut?url=https%3A%2F%2Fanti-broke-finance-app.mr-haibaoseal.workers.dev%2Fshortcuts%2Fguardpay-apple-pay.shortcut&amp;name=ApplePay%E8%87%AA%E5%8B%95%E8%A8%98%E5%B8%B3" class="btn-press py-3 px-3 rounded-xl bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg text-center">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>📥 一鍵直接匯入「ApplePay自動記帳」捷徑</span>
+          </a>
+          <a href="/shortcuts/guardpay-apple-pay.shortcut" download="ApplePay自動記帳.shortcut" class="btn-press py-3 px-3 rounded-xl bg-white/[0.08] text-amber-300 border border-amber-500/35 font-semibold text-xs flex items-center justify-center gap-2 text-center">
+            <i class="fa-solid fa-file-arrow-down"></i>
+            <span>備用：下載 .shortcut 檔 ➔ 點打開加入捷徑</span>
+          </a>
+        </div>
+
+        <div class="text-[11px] text-[#D1D5DB] leading-relaxed bg-black/35 rounded-xl p-3 border border-white/[0.08]">
+          <b>💡 匯入後只要 10 秒綁定：</b><br/>
+          1. 點上方黃色按鈕匯入捷徑（若 iOS 跳出提示，可點右邊「備用下載」➔ 點 Safari 左下角「下載 ➔ ApplePay自動記帳」➔ 點<b>「加入捷徑」</b>）。<br/>
+          2. 打開「捷徑 App」➔ 底部<b>「自動化」➔「＋」➔「交易」</b>（勾選卡片＋選「立即執行」）➔ 下一步直接點選剛裝好的<b>「ApplePay自動記帳」</b>就完成了！<b>完全不用點新增空白自動化自己拉動作！</b>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button type="button" id="btnCopyQuickZeroJsonUrl" class="btn-press btn-secondary py-2 px-3 text-[11px]">
+            📋 複製零設定極簡網址 (/api/q?a=)
           </button>
-          <button type="button" id="btnCopyApplePayUrl" class="btn-press btn-secondary py-2.5 px-3 text-xs">
+          <button type="button" id="btnCopyApplePayUrl" class="btn-press btn-secondary py-2 px-3 text-[11px]">
             📋 複製傳統 Webhook 網址
           </button>
         </div>
-        <details class="group bg-black/35 rounded-xl border border-white/[0.08] p-3" open>
-          <summary class="cursor-pointer font-semibold text-amber-300 flex items-center justify-between">
-            <span>📖 只需 3 步（免設 POST / 免打 JSON 欄位）：</span>
-            <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i>
-          </summary>
-          <ol class="mt-2 space-y-1.5 text-[#D1D5DB] list-decimal list-inside leading-relaxed">
-            <li>複製上方<b>「零設定極簡網址」</b>，點<b>「🚀 直接打開捷徑 App」</b>➔ 底部<b>「自動化」</b>➔ <b>「＋」</b>➔ <b>「交易」</b>（勾選卡片＋選<b>「立即執行」</b>）。</li>
-            <li>點<b>「新增空白自動化」</b>➔ 加入<b>「取得 URL 內容 (Get Contents of URL)」</b>。</li>
-            <li>點藍色「URL」貼上網址（<code>.../api/q?a=</code>）➔ 在 <code>a=</code> 後點鍵盤上方選<b>「交易 (改選：金額)」</b>，再打 <code>&amp;m=</code> 選<b>「交易 (改選：商家)」</b>即完成！<b>（完全不用展開改 POST 或 JSON）</b></li>
-          </ol>
-        </details>
       </div>
 
-      <!-- 通道 2：轉帳截圖 OCR -->
+      <!-- 通道 2：轉帳截圖 OCR (一鍵匯入已簽章捷徑檔，記憶體截圖辨識完自動銷毀，相簿 0 照片！) -->
       <div class="apple-inset space-y-3.5 text-xs border border-[#0A84FF]/25">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="font-semibold text-sm text-[#F5F5F7]">📸 通道 2：轉帳【轉出／轉入】截圖文字解析</span>
+          <span class="font-semibold text-sm text-[#F5F5F7]">📸 通道 2：敲機背兩下轉帳截圖記帳（相簿 0 照片殘留 · 免手動拉步驟）</span>
           <button type="button" id="btnCopyTransferOcrUrl" class="btn-press btn-secondary px-3 py-1.5 rounded-lg text-[11px]">
-            📋 複製轉帳極簡網址 (/api/q)
+            📋 複製轉帳網址 (/api/q)
           </button>
         </div>
 
-        <details class="group bg-black/35 rounded-xl border border-white/[0.08] p-3">
-          <summary class="cursor-pointer font-semibold text-sky-300 flex items-center justify-between">
-            <span>📖 進階可選：敲機背兩下截圖捷徑（免打 JSON 欄位版）</span>
-            <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i>
-          </summary>
-          <div class="mt-2.5 space-y-2 text-[#D1D5DB] leading-relaxed">
-            <div class="text-emerald-300 font-medium">💡 提示：若不想設捷徑，直接用最上方綠色按鈕「📸 直接選轉帳/刷卡截圖辨識」即可！若想設敲機背兩下，也完全不用打 JSON 欄位：</div>
-            <ol class="space-y-1.5 list-decimal list-inside">
-              <li><b>動作 1</b>：加入<b>「擷取螢幕畫面」</b>。</li>
-              <li><b>動作 2</b>：加入<b>「從影像中擷取文字」</b>。</li>
-              <li><b>動作 3</b>：加入<b>「取得 URL 內容」</b>➔ 貼上網址 <code>https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/q</code> ➔ 展開選 <code>POST</code> ➔ 要求主體選<b>「檔案 (File)」</b>（<b>不要選 JSON！</b>）➔ 右邊點選<b>「來自影像的文字」</b>即可！</li>
-            </ol>
-          </div>
-        </details>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <a href="shortcuts://import-shortcut?url=https%3A%2F%2Fanti-broke-finance-app.mr-haibaoseal.workers.dev%2Fshortcuts%2Fguardpay-transfer-ocr.shortcut&amp;name=%E8%BD%89%E5%B8%B3%E6%88%AA%E5%9C%96%E8%A8%98%E5%B8%B3" class="btn-press py-3 px-3 rounded-xl bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg text-center">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>📥 一鍵直接匯入「轉帳截圖記帳」捷徑</span>
+          </a>
+          <a href="/shortcuts/guardpay-transfer-ocr.shortcut" download="轉帳截圖記帳.shortcut" class="btn-press py-3 px-3 rounded-xl bg-white/[0.08] text-emerald-300 border border-emerald-500/35 font-semibold text-xs flex items-center justify-center gap-2 text-center">
+            <i class="fa-solid fa-file-arrow-down"></i>
+            <span>備用：下載 .shortcut 檔 ➔ 點打開加入捷徑</span>
+          </a>
+        </div>
+
+        <div class="text-[11px] text-[#D1D5DB] leading-relaxed bg-black/35 rounded-xl p-3 border border-white/[0.08]">
+          <span class="text-emerald-300 font-semibold">🛡️ 已經幫你把「擷取螢幕畫面（純記憶體，不存相簿）➔ 擷取文字 ➔ 自動上傳雲端」全部寫進捷徑檔裡並完成 Apple 簽章了！</span><br/>
+          1. 點上方綠色按鈕匯入（或點右邊「備用下載」➔ 點 Safari「下載項目 ➔ 轉帳截圖記帳」➔ 點<b>「加入捷徑」</b>）。<br/>
+          2. 到 iPhone <b>「設定 ➔ 輔助使用 ➔ 觸控 ➔ 背面輕點 ➔ 點兩下」</b>勾選<b>「轉帳截圖記帳」</b>即可！轉完帳敲手機背面兩下就自動入帳，<b>相簿絕對不會多出任何一張照片！</b>
+        </div>
 
         <div class="grid grid-cols-2 gap-2">
           <button type="button" data-ocr-preset-mode="OUT|EXPENSE" class="btn-press py-2.5 px-3 rounded-xl text-xs font-semibold bg-[#0A84FF] text-white border border-[#0A84FF]">

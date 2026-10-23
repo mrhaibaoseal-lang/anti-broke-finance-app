@@ -54,6 +54,14 @@ export default {
       }
       const headers = new Headers(assetRes.headers);
       headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+      if (url.pathname.endsWith('.shortcut')) {
+        const fileName = url.pathname.includes('transfer')
+          ? 'guardpay-transfer-ocr.shortcut'
+          : 'guardpay-apple-pay.shortcut';
+        headers.set('Content-Type', 'application/octet-stream');
+        headers.set('Content-Disposition', `attachment; filename="${fileName}"`);
+        headers.set('Access-Control-Allow-Origin', '*');
+      }
       return new Response(assetRes.body, {
         status: assetRes.status,
         statusText: assetRes.statusText,
