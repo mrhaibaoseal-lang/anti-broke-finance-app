@@ -3,6 +3,7 @@
 let dashboardState = null;
 let currentTxFilter = 'ALL';
 let selectedImpulseType = 'WANT';
+let selectedOcrCategory = 'EXPENSE';
 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -10,59 +11,47 @@ const fmtMoney = n => '$' + Number(n || 0).toLocaleString();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const NOTIFICATION_PRESETS = {
+  ocr_expense: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return {
+      category: 'EXPENSE',
+      text: `玉山銀行 臺幣轉帳 交易成功\n交易時間 ${today} 12:30\n轉帳金額 NT$450\n轉出帳號 0808-***1234\n轉入帳號 822-***5678\n備註：房東水電費`
+    };
+  },
+  ocr_advance: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return {
+      category: 'ADVANCE',
+      text: `玉山銀行 轉帳成功\n交易日期 ${today}\n交易金額 NT$1,800\n轉入帳號 013-***9988\n備註：幫朋友代墊聚餐費`
+    };
+  },
+  ocr_transfer: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return {
+      category: 'TRANSFER',
+      text: `轉帳成功 NT$3,000\n交易日期 ${today}\n轉入帳號 812-***7777\n備註：轉自己台新Richart備用`
+    };
+  },
   atm_deposit: () => {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】存款通知：您的玉山帳戶(末四碼1234)於 ${today} 15:20 於 ATM 現金存入 NT$5,000 元，帳戶可用餘額 NT$18,500 元。`;
-  },
-  cardless_deposit: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山Wallet】臺幣帳戶入帳通知：您的帳戶於 ${today} 18:10 完成無卡存款存入 新臺幣 3,000 元。`;
-  },
-  apple_pay_tap: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【Apple Pay 感應刷卡】您的 玉山銀行卡 於 ${today} 15:30 在「星巴克」使用 Apple Pay 一般消費 NT$155 元。`;
-  },
-  credit_ubear: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【消費通知】您的玉山Ｕ Bear信用卡(末四碼1234)於 ${today} 14:25 在「連加*麥當勞」一般消費 新臺幣 165.00 元，實際請款金額以帳單為準。`;
-  },
-  maixiang_auth: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】您的玉山簽帳金融卡於 ${today} 在 統一超商 刷卡消費授權 NT$10 元（麥香紅茶圈存）。`;
-  },
-  maixiang_settle: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】簽帳卡消費扣款通知：您的帳戶於 ${today} 商店請款扣款「7-ELEVEN」金額 NT$10 元。`;
-  },
-  linepay_auth: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山Wallet】簽帳金融卡消費授權通知：${today} 於「連加*７－ＥＬＥＶＥＮ」消費 NT$85 元。`;
-  },
-  linepay_settle: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】帳戶扣款通知：${today} 簽帳卡消費請款「LINE PAY*統一超商」（原始交易日 ${today}）實際扣款 NT$85 元。`;
-  },
-  steam_settle: () => {
-    const d2 = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10).replace(/-/g, '/');
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】簽帳卡消費扣款：${today} 商店請款「STEAMPOWERED」（原交易日 ${d2}）帳戶扣款 NT$1,023 元（含國外交易手續費）。`;
-  },
-  gas_settle: () => {
-    const d1 = new Date(Date.now() - 1 * 86400000).toISOString().slice(0, 10).replace(/-/g, '/');
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】簽帳卡消費扣款：${today}「台灣中油」（原交易日 ${d1}）實際請款扣款 NT$135 元。`;
-  },
-  verify_1ntd: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】簽帳金融卡消費授權：${today} 於「優食*UBEREATS」刷卡 NT$1 元（卡片綁定驗證）。`;
-  },
-  easycard_topup: () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】簽帳金融卡消費授權：${today} 於「悠遊卡自動加值」刷卡消費 NT$500 元。`;
+    return {
+      category: 'EXPENSE',
+      text: `【玉山銀行】存款通知：您的玉山帳戶(末四碼1234)於 ${today} 15:20 於 ATM 現金存入 NT$5,000 元，帳戶可用餘額 NT$18,500 元。`
+    };
   },
   salary_in: () => {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    return `【玉山銀行】薪資入帳通知：您的玉山帳戶於 ${today} 收到薪資轉帳入帳 NT$24,800 元。`;
+    return {
+      category: 'EXPENSE',
+      text: `【玉山銀行】薪資入帳通知：您的玉山帳戶於 ${today} 收到薪資轉帳入帳 NT$24,800 元。`
+    };
+  },
+  blocked_card: () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    return {
+      category: 'EXPENSE',
+      text: `【玉山銀行】您的玉山簽帳金融卡(卡號1234)於 ${today} 在「統一超商」刷卡消費授權 NT$85 元（此類銀行刷卡通知將自動被攔截忽略）。`
+    };
   }
 };
 
@@ -1041,21 +1030,54 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#btnOpenBalanceSync')?.addEventListener('click', () => $('#modalBalanceSync')?.classList.remove('hidden'));
   $('#btnOpenFixedModal')?.addEventListener('click', () => $('#modalFixedExpense')?.classList.remove('hidden'));
 
+  const setOcrCategoryUI = cat => {
+    selectedOcrCategory = cat;
+    $$('#ocrCategorySelector [data-ocr-cat]').forEach(btn => {
+      const active = btn.dataset.ocrCat === cat;
+      btn.className = `btn-press py-2 px-2.5 rounded-xl text-xs ${
+        active
+          ? 'font-semibold bg-[#0A84FF] text-white border border-[#0A84FF]'
+          : 'font-medium bg-[#151821] text-[#8E95A5] border border-white/[0.08]'
+      }`;
+    });
+  };
+
+  $('#ocrCategorySelector')?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-ocr-cat]');
+    if (!btn) return;
+    setOcrCategoryUI(btn.dataset.ocrCat);
+  });
+
   $('#presetButtonsWrap')?.addEventListener('click', e => {
     const b = e.target.closest('[data-preset]');
     if (!b) return;
     const fn = NOTIFICATION_PRESETS[b.dataset.preset];
-    if (fn) $('#notifInput').value = fn();
+    if (fn) {
+      const val = fn();
+      if (val && typeof val === 'object') {
+        $('#notifInput').value = val.text || '';
+        if (val.category) setOcrCategoryUI(val.category);
+      } else {
+        $('#notifInput').value = String(val || '');
+      }
+    }
   });
 
   $('#btnParseNotif')?.addEventListener('click', async () => {
     const text = $('#notifInput').value.trim();
-    if (!text) return alert('請先貼上通知文字或點選上方測試範本！');
+    if (!text) return alert('請先貼上轉帳螢幕 OCR 文字或點選上方測試範本！');
     try {
-      const res = await apiCall('/api/notifications/parse', 'POST', { text });
+      const res = await apiCall('/api/notifications/webhook', 'POST', {
+        source: 'manual_ocr_ui',
+        raw_text: text,
+        category: selectedOcrCategory
+      });
       const box = $('#notifResultBox');
       box.classList.remove('hidden');
-      box.className = 'rounded-xl p-4 text-xs bg-emerald-500/12 border border-emerald-500/25 text-emerald-300 font-medium';
+      const isIgnored = res.result?.ignored || res.result?.resultType === 'IGNORED_BANK_CARD' || res.result?.resultType === 'IDEMPOTENCY_IGNORED';
+      box.className = isIgnored
+        ? 'rounded-xl p-4 text-xs bg-amber-500/12 border border-amber-500/25 text-amber-300 font-medium'
+        : 'rounded-xl p-4 text-xs bg-emerald-500/12 border border-emerald-500/25 text-emerald-300 font-medium';
       box.textContent = `【${res.result.resultType}】${res.result.message}`;
       $('#notifInput').value = '';
       renderDashboard(res.dashboard);
@@ -1595,21 +1617,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   $('#btnSimulateApplePay')?.addEventListener('click', async () => {
+    const merchant = ($('#quickAppleMerchant')?.value || '').trim() || '星巴克';
+    const amount = Number($('#quickAppleAmount')?.value) || 155;
+    const cardName = ($('#quickAppleCard')?.value || '').trim() || '玉山 Unicard';
     try {
-      const res = await apiCall('/api/notifications/apple-pay', 'POST', {
-        source: 'apple_pay_auto',
-        merchant: '星巴克 STARBUCKS',
-        amount: 155,
-        card: '玉山 U Bear (Apple Pay)'
+      const res = await apiCall('/api/notifications/webhook', 'POST', {
+        source: 'apple_pay',
+        amount,
+        merchant,
+        card_name: cardName,
+        timestamp: new Date().toISOString()
       });
       const box = $('#notifResultBox');
       if (box) {
         box.classList.remove('hidden');
         box.className = 'rounded-xl p-4 text-xs bg-emerald-500/12 border border-emerald-500/25 text-emerald-300 font-medium';
-        box.textContent = `🍎【Apple Pay 自動入帳成功】${res.result.message}`;
+        box.textContent = `🍎【${res.result.resultType}】${res.result.message}`;
       }
       renderDashboard(res.dashboard);
-      showAutoToast(`🍎 Apple Pay 感應入帳：${res.result.parsed?.normalizedMerchant} -$${res.result.parsed?.amount}`);
+      showAutoToast(`🍎 Apple Pay 已確認入帳 (SETTLED)：${res.result.parsed?.normalizedMerchant} -$${res.result.parsed?.amount}`);
     } catch (err) {
       alert(err.message);
     }
