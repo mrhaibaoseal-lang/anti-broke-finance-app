@@ -246,6 +246,7 @@ export async function initApp() {
 
   $('#btnCopyApplePayUrl')?.addEventListener('click', () => copyUrlHelper('/api/webhook/apple-pay', 'Apple Pay 自動入帳網址'));
   $('#btnCopyLegacyWebhookUrl')?.addEventListener('click', () => copyUrlHelper('/api/notifications/webhook', '相容 Webhook 網址'));
+  $('#btnCopyTransferOcrUrl')?.addEventListener('click', () => copyUrlHelper('/api/webhook/transfer-ocr', '轉帳截圖 OCR 網址'));
 
   // 背景每 10 秒自動偵測雲端新入帳 (當手機刷完 Apple Pay 或執行截圖捷徑後，畫面自動刷新並彈出通知！)
   const pollCloudForNewAutoEntries = async () => {
