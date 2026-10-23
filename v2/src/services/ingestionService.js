@@ -79,8 +79,13 @@ async function evaluateDeduplication(db, {
       Number(prev.amount) === Math.round(Number(amount) || 0)
     );
 
-    // 層級 1：2 分鐘內完全相同 payload 或同通道+同主指紋 ➔ 自動攔截不寫入
-    if (diffMs <= exactBlockMs && (isSameExactPayload || (prev.source_channel === sourceChannel && isSamePrimaryFingerprint))) {
+    // 層級 1：2 分鐘內完全相同 payload、或同通道+同主指紋、或兩筆 Apple Pay 捷徑在 60 秒內同金額同時觸發 ➔ 自動攔截不寫入
+    const isDualApplePayShortcut = sourceChannel === 'apple_pay_webhook' &&
+      prev.source_channel === 'apple_pay_webhook' &&
+      diffMs <= 60 * 1000 &&
+      Number(prev.amount) === Math.round(Number(amount) || 0);
+
+    if (diffMs <= exactBlockMs && (isSameExactPayload || isDualApplePayShortcut || (prev.source_channel === sourceChannel && isSamePrimaryFingerprint))) {
       return {
         decision: 'BLOCKED_DUPLICATE',
         fingerprint: primaryFingerprint,

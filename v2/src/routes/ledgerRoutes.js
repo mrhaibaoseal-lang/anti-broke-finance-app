@@ -14,28 +14,59 @@ const {
 const { buildDashboardState } = require('./dashboardRoutes');
 
 function extractApplePayPayload(body = {}) {
-  const rawText = String(body.raw_text || body.rawText || body.text || body.message || '').trim();
+  const titleStr = String(body.title || body.標題 || '').trim();
+  const bodyStr = String(body.body || body.內文 || body.content || '').trim();
+  const combinedNotif = (titleStr || bodyStr) ? `${titleStr} ${bodyStr}`.trim() : '';
+
+  const rawText = String(
+    body.raw_text || body.rawText || body.text || body.message || body.notification || body.input || combinedNotif || ''
+  ).trim();
+
   let merchant = String(
     body.merchant || body.store || body.shop || body.name ||
     body.商家 || body.商店 || body.名稱 || ''
   ).trim();
   let amount = body.amount ?? body.money ?? body.price ?? body.金額 ?? null;
-  const cardName = String(
+  let cardName = String(
     body.card_name || body.cardName || body.card || body.pass ||
-    body.卡片 || body.票卡 || 'Apple Pay'
+    body.卡片 || body.票卡 || ''
   ).trim();
 
-  if ((!merchant || amount === null) && rawText) {
-    const mMatch = rawText.match(/[「『]([^」』]+)[」』]/);
-    if (!merchant && mMatch) merchant = mMatch[1].trim();
-    const aMatch = rawText.match(/(?:NT\$|TWD|\$)\s*([0-9,]+(?:\.[0-9]+)?)|([0-9,]+)\s*元/i);
-    if (amount === null && aMatch) amount = aMatch[1] || aMatch[2];
+  // 相容圖 2「當我收到來自 錢包 的通知時」({ title, body } 或純文字通知)
+  if (titleStr && !cardName && /玉山|簽帳|金融卡|信用卡|銀行|卡|Pay|Wallet/i.test(titleStr)) {
+    cardName = titleStr;
+  } else if (titleStr && !merchant) {
+    merchant = titleStr;
+  }
+
+  if (amount === null && rawText) {
+    const aMatch = rawText.match(/(?:NT\$|TWD|新[台臺]幣|\$)\s*([0-9,]+(?:\.[0-9]+)?)|([0-9,]+(?:\.[0-9]+)?)\s*元/i);
+    if (aMatch) amount = aMatch[1] || aMatch[2];
+  }
+
+  if (!merchant && rawText) {
+    const quoteMatch = rawText.match(/[「『]([^」』]+)[」』]/);
+    if (quoteMatch) {
+      merchant = quoteMatch[1].trim();
+    } else {
+      // 從錢包通知內文提取商店名稱 (例如 "星巴克 NT$155" 或 "於 7-ELEVEN 消費 $65")
+      const cleanedForMerchant = rawText
+        .replace(/(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+(?:\.[0-9]+)?\s*元?/gi, ' ')
+        .replace(/[0-9,]+(?:\.[0-9]+)?\s*元/g, ' ')
+        .replace(/玉山[^\s，,。•·]*卡?/g, ' ')
+        .replace(/Apple\s*Pay|感應刷卡|一般消費|消費通知|錢包/gi, ' ')
+        .replace(/[•·｜|\-\n\r]+/g, ' ')
+        .trim();
+      if (cleanedForMerchant) {
+        merchant = cleanedForMerchant.split(/\s+/)[0].slice(0, 24);
+      }
+    }
   }
 
   return {
     source: 'apple_pay',
     amount: amount ?? 0,
-    merchant: merchant || '未知商店',
+    merchant: merchant || 'Apple Pay 消費',
     card_name: cardName || 'Apple Pay',
     timestamp: body.timestamp || new Date().toISOString(),
     referenceDate: body.referenceDate || undefined
