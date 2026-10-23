@@ -13,10 +13,61 @@ const {
 } = require('../services/splitAndTankService');
 const { buildDashboardState } = require('./dashboardRoutes');
 
+function extractApplePayPayload(body = {}) {
+  const rawText = String(body.raw_text || body.rawText || body.text || body.message || '').trim();
+  let merchant = String(
+    body.merchant || body.store || body.shop || body.name ||
+    body.商家 || body.商店 || body.名稱 || ''
+  ).trim();
+  let amount = body.amount ?? body.money ?? body.price ?? body.金額 ?? null;
+  const cardName = String(
+    body.card_name || body.cardName || body.card || body.pass ||
+    body.卡片 || body.票卡 || 'Apple Pay'
+  ).trim();
+
+  if ((!merchant || amount === null) && rawText) {
+    const mMatch = rawText.match(/[「『]([^」』]+)[」』]/);
+    if (!merchant && mMatch) merchant = mMatch[1].trim();
+    const aMatch = rawText.match(/(?:NT\$|TWD|\$)\s*([0-9,]+(?:\.[0-9]+)?)|([0-9,]+)\s*元/i);
+    if (amount === null && aMatch) amount = aMatch[1] || aMatch[2];
+  }
+
+  return {
+    source: 'apple_pay',
+    amount: amount ?? 0,
+    merchant: merchant || '未知商店',
+    card_name: cardName || 'Apple Pay',
+    timestamp: body.timestamp || new Date().toISOString(),
+    referenceDate: body.referenceDate || undefined
+  };
+}
+
+function isApplePayWebhookPayload(body = {}) {
+  const src = String(body.source || '').trim().toLowerCase();
+  if (src === 'apple_pay' || src === 'apple_pay_auto') return true;
+
+  const hasRawText = Boolean(String(body.raw_text || body.rawText || body.text || body.message || '').trim());
+  const hasMerchantField = Boolean(
+    body.merchant || body.store || body.shop || body.商家 || body.商店 || body.票卡 || body.card_name || body.cardName || body.pass
+  );
+  const hasAmountField = (body.amount ?? body.money ?? body.price ?? body.金額) !== undefined;
+
+  if (!hasRawText && hasMerchantField && hasAmountField) {
+    return true;
+  }
+
+  const rawText = String(body.raw_text || body.rawText || body.text || body.message || '');
+  return /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包票卡/i.test(rawText);
+}
+
 async function handleLedgerRoutes(db, method, pathname, body) {
-  // 1. Apple Pay 原生捷徑入帳端點
-  if ((method === 'POST' || method === 'GET') && (pathname === '/api/webhook/apple-pay' || pathname === '/api/notifications/apple-pay' || pathname === '/api/transactions/apple-pay')) {
-    const result = await ingestApplePayTransaction(db, body);
+  if (
+    (method === 'POST' || method === 'GET') &&
+    (pathname === '/api/webhook/apple-pay' ||
+     pathname === '/api/notifications/apple-pay' ||
+     pathname === '/api/transactions/apple-pay')
+  ) {
+    const result = await ingestApplePayTransaction(db, extractApplePayPayload(body));
     const dashboard = await buildDashboardState(db);
     return {
       status: 200,
@@ -29,11 +80,16 @@ async function handleLedgerRoutes(db, method, pathname, body) {
     };
   }
 
-  // 2. 轉帳/收帳截圖 OCR 與通用 Webhook 端點
-  if (method === 'POST' && (pathname === '/api/webhook/transfer-ocr' || pathname === '/api/webhook/transfer' || pathname === '/api/notifications/webhook')) {
-    const src = String(body.source || '').trim().toLowerCase();
-    if (src === 'apple_pay' || src === 'apple_pay_auto') {
-      const result = await ingestApplePayTransaction(db, body);
+  if (
+    (method === 'POST' || method === 'GET') &&
+    (pathname === '/api/webhook/transfer-ocr' ||
+     pathname === '/api/webhook/transfer' ||
+     pathname === '/api/notifications/webhook' ||
+     pathname === '/api/notifications/parse' ||
+     pathname === '/api/transactions/transfer')
+  ) {
+    if (isApplePayWebhookPayload(body)) {
+      const result = await ingestApplePayTransaction(db, extractApplePayPayload(body));
       const dashboard = await buildDashboardState(db);
       return {
         status: 200,

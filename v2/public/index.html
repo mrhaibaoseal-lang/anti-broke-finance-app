@@ -131,13 +131,13 @@
           </div>
         </button>
 
-        <button type="button" id="btnHomeQuickWebhook" class="btn-press bento-card !p-4 flex flex-col items-center justify-center gap-2 text-center">
+        <button type="button" id="btnHomeQuickWebhook" class="btn-press bento-card !p-4 flex flex-col items-center justify-center gap-2 text-center border-amber-500/25">
           <span class="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-400 grid place-items-center text-base">
-            <i class="fa-solid fa-mobile-screen-button"></i>
+            <i class="fa-brands fa-apple"></i>
           </span>
           <div>
-            <div class="text-xs font-semibold text-[#F5F5F7]">Apple Pay / 轉帳</div>
-            <div class="text-[11px] text-[#8E95A5]">截圖 OCR · 10m 防重</div>
+            <div class="text-xs font-semibold text-[#F5F5F7]">Apple Pay 自動偵測</div>
+            <div class="text-[11px] text-[#8E95A5]">感應刷卡 ＆ 轉帳 OCR</div>
           </div>
         </button>
 
@@ -710,15 +710,45 @@
         <button type="button" data-close-modal="modalWebhookOcr" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center">✕</button>
       </div>
 
-      <!-- 通道 1：Apple Pay -->
-      <div class="apple-inset space-y-3 text-xs">
-        <div class="font-semibold text-sm text-[#F5F5F7]">🍎 通道 1：Apple Pay 消費入帳</div>
-        <div class="grid grid-cols-3 gap-2">
-          <input id="quickAppleMerchant" type="text" class="input-fintech text-xs" placeholder="商家" value="星巴克" />
-          <input id="quickAppleAmount" type="number" class="input-fintech text-xs font-bold tabular-nums" placeholder="金額" value="155" />
-          <input id="quickAppleCard" type="text" class="input-fintech text-xs" placeholder="卡片" value="玉山 Unicard" />
+      <!-- 通道 1：Apple Pay 原生捷徑全自動感應入帳 -->
+      <div class="apple-inset space-y-3 text-xs border border-amber-500/25">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="font-semibold text-sm text-[#F5F5F7] flex items-center gap-2">
+            <i class="fa-brands fa-apple text-amber-400"></i>
+            <span>通道 1：iOS 捷徑「Apple Pay 交易」全自動感應入帳</span>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-medium border border-emerald-500/30">
+            🟢 雲端自動偵測待命中
+          </span>
         </div>
-        <button type="button" id="btnSimulateApplePay" class="btn-press btn-primary w-full py-2.5 text-xs">送出 Apple Pay 消費</button>
+
+        <div class="text-xs text-[#8E95A5] leading-relaxed">
+          手機「嗶」感應刷 Apple Pay 時，由 iOS「自動化 ➔ 交易」背景自動傳入雲端並直接扣減數位預算（支援中英文欄位 <code>amount/金額</code>、<code>merchant/商家</code>、<code>card_name/名稱或票卡</code>，且內建 10 分鐘防重鎖）：
+        </div>
+
+        <div class="bg-black/45 border border-white/[0.08] rounded-xl p-3 font-mono text-[11px] text-amber-300 select-all break-all leading-relaxed">
+          POST https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/webhook/apple-pay<br/>
+          <span class="text-[#8E95A5]">（亦相容舊網址 POST /api/notifications/webhook）</span><br/>
+          { "source": "apple_pay", "amount": 155, "merchant": "星巴克", "card_name": "玉山 Unicard" }
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button type="button" id="btnCopyApplePayUrl" class="btn-press btn-secondary py-2.5 px-3 text-xs">
+            📋 複製 Apple Pay 自動入帳網址
+          </button>
+          <button type="button" id="btnCopyLegacyWebhookUrl" class="btn-press btn-secondary py-2.5 px-3 text-xs">
+            📋 複製舊版相容 Webhook 網址
+          </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 pt-1">
+          <input id="quickAppleMerchant" type="text" class="input-fintech text-xs" placeholder="商家 (例: 星巴克)" value="星巴克" />
+          <input id="quickAppleAmount" type="number" class="input-fintech text-xs font-bold tabular-nums" placeholder="金額 ($)" value="155" />
+          <input id="quickAppleCard" type="text" class="input-fintech text-xs" placeholder="卡片名稱" value="玉山 Unicard" />
+        </div>
+        <button type="button" id="btnSimulateApplePay" class="btn-press btn-primary w-full py-2.5 text-xs">
+          🍎 立即模擬測試 Apple Pay 感應入帳
+        </button>
       </div>
 
       <!-- 通道 2：轉帳截圖 OCR -->

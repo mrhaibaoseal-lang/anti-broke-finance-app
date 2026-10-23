@@ -230,7 +230,52 @@ export async function initApp() {
     showToast(res.message || '✅ 修改已儲存，預算與水庫餘額已同步更新！');
   });
 
-  // 6. Apple Pay 捷徑模擬與轉帳截圖 OCR 解析
+  // 6. Apple Pay 捷徑網址一鍵複製、模擬入帳与轉帳截圖 OCR 解析
+  const copyUrlHelper = async (pathSuffix, label) => {
+    const origin = window.location?.origin && window.location.origin.startsWith('http')
+      ? window.location.origin
+      : 'https://anti-broke-finance-app.mr-haibaoseal.workers.dev';
+    const fullUrl = `${origin}${pathSuffix}`;
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      showToast(`✅ 已複製 ${label}：${fullUrl}`);
+    } catch (_) {
+      prompt(`請複製以下 ${label}：`, fullUrl);
+    }
+  };
+
+  $('#btnCopyApplePayUrl')?.addEventListener('click', () => copyUrlHelper('/api/webhook/apple-pay', 'Apple Pay 自動入帳網址'));
+  $('#btnCopyLegacyWebhookUrl')?.addEventListener('click', () => copyUrlHelper('/api/notifications/webhook', '相容 Webhook 網址'));
+
+  // 背景每 10 秒自動偵測雲端新入帳 (當手機刷完 Apple Pay 或執行截圖捷徑後，畫面自動刷新並彈出通知！)
+  const pollCloudForNewAutoEntries = async () => {
+    if (document.hidden) return;
+    try {
+      const prevTopId = Number(getStore().dashboard?.entries?.[0]?.id) || 0;
+      const latest = await apiCall('/api/dashboard', 'GET');
+      const newTop = latest?.entries?.[0];
+      const newTopId = Number(newTop?.id) || 0;
+      if (newTopId > prevTopId && prevTopId > 0) {
+        setDashboardState(latest);
+        const isApple = newTop.source_channel === 'apple_pay_webhook';
+        showToast(
+          `${isApple ? '🍎 自動偵測到 Apple Pay 消費' : '⚡ 自動偵測到最新入帳'}：${newTop.normalized_merchant} $${Number(newTop.amount).toLocaleString()}`,
+          { undoEntryId: newTop.id, onUndo: handleUndoDeleteEntry, duration: 8000 }
+        );
+      } else if (
+        latest?.budgetOverview?.metrics?.digitalRemainingBudget !==
+        getStore().dashboard?.budgetOverview?.metrics?.digitalRemainingBudget
+      ) {
+        setDashboardState(latest);
+      }
+    } catch (_) {}
+  };
+  setInterval(pollCloudForNewAutoEntries, 10000);
+  window.addEventListener('focus', pollCloudForNewAutoEntries);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) pollCloudForNewAutoEntries();
+  });
+
   $('#btnSimulateApplePay')?.addEventListener('click', async () => {
     const merchant = ($('#quickAppleMerchant')?.value || '星巴克').trim();
     const amount = Number($('#quickAppleAmount')?.value || 155);

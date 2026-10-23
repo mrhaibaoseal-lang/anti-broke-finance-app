@@ -240,6 +240,18 @@ test('6. REST API 路由整合測試：完整覆蓋預算設定、Apple Pay、�
   });
   assert.equal(delRes.data.dashboard.budgetOverview.metrics.digitalRemainingBudget, 20000);
   assert.equal(delRes.data.dashboard.budgetOverview.metrics.cashBalance, 2000);
+
+  // 3. 驗證 iOS 捷徑傳送中文欄位或無 source 標籤至 /api/notifications/webhook 時，自動識別為 Apple Pay 消費
+  const apAutoRes = await handleApiRequest(db, 'POST', '/api/notifications/webhook', {
+    商家: '統一超商',
+    金額: 'NT$65',
+    票卡: '玉山 Unicard'
+  });
+  assert.equal(apAutoRes.status, 200);
+  assert.equal(apAutoRes.data.result.entry.source_channel, 'apple_pay_webhook');
+  assert.equal(apAutoRes.data.result.entry.normalized_merchant, '7-ELEVEN');
+  assert.equal(apAutoRes.data.dashboard.budgetOverview.metrics.digitalRemainingBudget, 20000 - 65);
 });
+
 
 
