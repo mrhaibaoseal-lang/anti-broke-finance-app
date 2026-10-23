@@ -19,18 +19,33 @@ function extractApplePayPayload(body = {}) {
   const combinedNotif = (titleStr || bodyStr) ? `${titleStr} ${bodyStr}`.trim() : '';
 
   const rawText = String(
-    body.raw_text || body.rawText || body.text || body.message || body.notification || body.input || combinedNotif || ''
+    body.raw_text || body.rawText || body.text || body.message || body.notification || body.input || body.t || body.q || combinedNotif || ''
   ).trim();
 
   let merchant = String(
     body.merchant || body.store || body.shop || body.name ||
-    body.商家 || body.商店 || body.名稱 || ''
+    body.商家 || body.商店 || body.名稱 || body.m || ''
   ).trim();
-  let amount = body.amount ?? body.money ?? body.price ?? body.金額 ?? null;
+  let amount = body.amount ?? body.money ?? body.price ?? body.金額 ?? body.a ?? null;
   let cardName = String(
     body.card_name || body.cardName || body.card || body.pass ||
-    body.卡片 || body.票卡 || ''
+    body.卡片 || body.票卡 || body.c || ''
   ).trim();
+
+  // 支援極簡速記格式，例如 ?q=155_星巴克 或 ?t=星巴克 155
+  if (amount === null && !merchant && rawText) {
+    const quickPair = rawText.match(/^\$?\s*([0-9,]+(?:\.[0-9]+)?)\s*[_,，\s/｜|-]+\s*(.+)$/) ||
+                      rawText.match(/^(.+?)\s*[_,，\s/｜|-]+\s*\$?\s*([0-9,]+(?:\.[0-9]+)?)\s*元?$/);
+    if (quickPair) {
+      if (/^[0-9,]+(?:\.[0-9]+)?$/.test(quickPair[1])) {
+        amount = quickPair[1];
+        merchant = quickPair[2].trim();
+      } else {
+        merchant = quickPair[1].trim();
+        amount = quickPair[2];
+      }
+    }
+  }
 
   // 相容圖 2「當我收到來自 錢包 的通知時」({ title, body } 或純文字通知)
   if (titleStr && !cardName && /玉山|簽帳|金融卡|信用卡|銀行|卡|Pay|Wallet/i.test(titleStr)) {
@@ -40,7 +55,8 @@ function extractApplePayPayload(body = {}) {
   }
 
   if (amount === null && rawText) {
-    const aMatch = rawText.match(/(?:NT\$|TWD|新[台臺]幣|\$)\s*([0-9,]+(?:\.[0-9]+)?)|([0-9,]+(?:\.[0-9]+)?)\s*元/i);
+    const aMatch = rawText.match(/(?:NT\$|TWD|新[台臺]幣|\$)\s*([0-9,]+(?:\.[0-9]+)?)|([0-9,]+(?:\.[0-9]+)?)\s*元/i) ||
+                   rawText.match(/\b([0-9]{1,6})\b/);
     if (aMatch) amount = aMatch[1] || aMatch[2];
   }
 
@@ -53,9 +69,10 @@ function extractApplePayPayload(body = {}) {
       const cleanedForMerchant = rawText
         .replace(/(?:NT\$|TWD|新[台臺]幣|\$)\s*[0-9,]+(?:\.[0-9]+)?\s*元?/gi, ' ')
         .replace(/[0-9,]+(?:\.[0-9]+)?\s*元/g, ' ')
+        .replace(/\b[0-9]{1,6}\b/g, ' ')
         .replace(/玉山[^\s，,。•·]*卡?/g, ' ')
         .replace(/Apple\s*Pay|感應刷卡|一般消費|消費通知|錢包/gi, ' ')
-        .replace(/[•·｜|\-\n\r]+/g, ' ')
+        .replace(/[•·｜|\-\n\r_]+/g, ' ')
         .trim();
       if (cleanedForMerchant) {
         merchant = cleanedForMerchant.split(/\s+/)[0].slice(0, 24);
@@ -77,7 +94,9 @@ function isApplePayWebhookPayload(body = {}) {
   const src = String(body.source || '').trim().toLowerCase();
   if (src === 'apple_pay' || src === 'apple_pay_auto') return true;
 
-  const hasRawText = Boolean(String(body.raw_text || body.rawText || body.text || body.message || '').trim());
+  if (body.a !== undefined || body.m !== undefined || body.c !== undefined) return true;
+
+  const hasRawText = Boolean(String(body.raw_text || body.rawText || body.text || body.message || body.t || body.q || '').trim());
   const hasMerchantField = Boolean(
     body.merchant || body.store || body.shop || body.商家 || body.商店 || body.票卡 || body.card_name || body.cardName || body.pass
   );
@@ -87,11 +106,36 @@ function isApplePayWebhookPayload(body = {}) {
     return true;
   }
 
-  const rawText = String(body.raw_text || body.rawText || body.text || body.message || '');
-  return /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包票卡/i.test(rawText);
+  const rawText = String(body.raw_text || body.rawText || body.text || body.message || body.t || body.q || '');
+  if (/轉帳|轉出|轉入|帳號|餘額|手續費|ATM|提款|存款/i.test(rawText)) {
+    return false;
+  }
+  return /APPLE\s*PAY|APPLE\s*錢包|APPLE\s*WALLET|感應刷卡|錢包票卡/i.test(rawText) ||
+         Boolean(rawText && rawText.length <= 45 && /\d/.test(rawText));
 }
 
 async function handleLedgerRoutes(db, method, pathname, body) {
+  // 0. 萬能極簡零設定端點 /api/q (支援 GET ?a=155&m=星巴克 或 ?t=任意文字，也支援 POST 純文字)
+  if ((method === 'POST' || method === 'GET') && (pathname === '/api/q' || pathname === '/api/quick')) {
+    const normalizedBody = {
+      ...body,
+      raw_text: body.raw_text || body.rawText || body.text || body.t || body.q || ''
+    };
+    const result = isApplePayWebhookPayload(normalizedBody)
+      ? await ingestApplePayTransaction(db, extractApplePayPayload(normalizedBody))
+      : await ingestTransferOrOcr(db, normalizedBody);
+    const dashboard = await buildDashboardState(db);
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        result,
+        dailySafeBudget: dashboard.budgetOverview.metrics.dailySafeBudget,
+        dashboard
+      }
+    };
+  }
+
   if (
     (method === 'POST' || method === 'GET') &&
     (pathname === '/api/webhook/apple-pay' ||

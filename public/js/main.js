@@ -244,9 +244,103 @@ export async function initApp() {
     }
   };
 
+  $('#btnCopyQuickZeroJsonUrl')?.addEventListener('click', () => copyUrlHelper('/api/q?a=', '零設定極簡網址'));
   $('#btnCopyApplePayUrl')?.addEventListener('click', () => copyUrlHelper('/api/webhook/apple-pay', 'Apple Pay 自動入帳網址'));
   $('#btnCopyLegacyWebhookUrl')?.addEventListener('click', () => copyUrlHelper('/api/notifications/webhook', '相容 Webhook 網址'));
-  $('#btnCopyTransferOcrUrl')?.addEventListener('click', () => copyUrlHelper('/api/webhook/transfer-ocr', '轉帳截圖 OCR 網址'));
+  $('#btnCopyTransferOcrUrl')?.addEventListener('click', () => copyUrlHelper('/api/q', '轉帳極簡網址'));
+
+  // 常用商家 1 秒點選
+  $$('[data-quick-merchant]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mInput = $('#quickAppleMerchant');
+      const aInput = $('#quickAppleAmount');
+      if (mInput) mInput.value = btn.dataset.quickMerchant;
+      if (aInput) aInput.focus();
+    });
+  });
+
+  // 📋 免設捷徑：一鍵讀取剪貼簿文字自動入帳
+  $('#btnPasteClipboardAuto')?.addEventListener('click', async () => {
+    try {
+      const clipText = (await navigator.clipboard.readText() || '').trim();
+      if (!clipText) {
+        return alert('剪貼簿目前沒有文字！請先複製銀行通知、簡訊或截圖原況文字。');
+      }
+      if ($('#ocrRawTextInput')) $('#ocrRawTextInput').value = clipText;
+      const res = await apiCall('/api/q', 'POST', {
+        raw_text: clipText,
+        direction: getStore().ocrDirection,
+        flowType: getStore().ocrFlowType
+      });
+      setDashboardState(res.dashboard);
+      showToast(res.result?.message || '📋 已從剪貼簿自動解析並入帳！', {
+        undoEntryId: res.result?.entry?.id,
+        onUndo: handleUndoDeleteEntry
+      });
+    } catch (err) {
+      alert('無法直接讀取剪貼簿，請在下方文字框長按「貼上」後點解析：' + (err?.message || ''));
+    }
+  });
+
+  // 📸 免設捷徑：App 內直接選轉帳/刷卡截圖自動 OCR 辨識入帳
+  $('#btnPickScreenshotOcr')?.addEventListener('click', () => {
+    $('#inAppOcrImageInput')?.click();
+  });
+
+  $('#inAppOcrImageInput')?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const lbl = $('#lblPickScreenshotOcr');
+    const origText = lbl ? lbl.textContent : '📸 直接選轉帳/刷卡截圖辨識';
+    try {
+      if (lbl) lbl.textContent = '⏳ 正在辨識截圖文字 (約 3~5 秒)...';
+      if (!window.Tesseract) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('OCR 引擎載入失敗'));
+          document.head.appendChild(s);
+        });
+      }
+      const { data } = await window.Tesseract.recognize(file, 'chi_tra+eng');
+      const recognizedText = String(data?.text || '').replace(/\s+/g, ' ').trim();
+      if (!recognizedText) throw new Error('未能從圖片辨識出文字');
+      if ($('#ocrRawTextInput')) $('#ocrRawTextInput').value = recognizedText;
+
+      const res = await apiCall('/api/q', 'POST', {
+        raw_text: recognizedText,
+        direction: getStore().ocrDirection,
+        flowType: getStore().ocrFlowType
+      });
+      setDashboardState(res.dashboard);
+      showToast(res.result?.message || '📸 截圖辨識入帳成功！', {
+        undoEntryId: res.result?.entry?.id,
+        onUndo: handleUndoDeleteEntry,
+        duration: 8000
+      });
+    } catch (err) {
+      alert('截圖自動辨識失敗：' + (err?.message || '請改用剪貼簿貼上或手動輸入金額'));
+    } finally {
+      if (lbl) lbl.textContent = origText;
+      e.target.value = '';
+    }
+  });
+
+  // 支援網址直接帶參數自動入帳 (例如 iOS 捷徑用「打開 URL」連到 /?a=155&m=星巴克 或 /?q=155_星巴克)
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.has('a') || urlParams.has('q') || urlParams.has('t') || urlParams.has('amount')) {
+    const qp = Object.fromEntries(urlParams.entries());
+    window.history.replaceState({}, document.title, window.location.pathname);
+    apiCall('/api/q', 'POST', qp).then(res => {
+      if (res?.dashboard) setDashboardState(res.dashboard);
+      showToast(res?.result?.message || '⚡ 已透過極簡網址自動入帳！', {
+        undoEntryId: res?.result?.entry?.id,
+        onUndo: handleUndoDeleteEntry,
+        duration: 8000
+      });
+    }).catch(() => {});
+  }
 
   // 背景每 10 秒自動偵測雲端新入帳 (當手機刷完 Apple Pay 或執行截圖捷徑後，畫面自動刷新並彈出通知！)
   const pollCloudForNewAutoEntries = async () => {

@@ -710,100 +710,109 @@
         <button type="button" data-close-modal="modalWebhookOcr" class="btn-press w-8 h-8 rounded-full bg-white/[0.08] text-[#8E95A5] hover:text-white text-sm grid place-items-center">✕</button>
       </div>
 
-      <!-- 通道 1：Apple Pay 原生捷徑全自動感應入帳 -->
+      <!-- 通道 0：免設捷徑！iPhone App 內 1 秒極速記帳 -->
+      <div class="apple-inset space-y-3 text-xs border border-emerald-500/35 bg-emerald-500/[0.04]">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="font-semibold text-sm text-emerald-300 flex items-center gap-2">
+            <i class="fa-solid fa-bolt"></i>
+            <span>免設捷徑！App 內 1 秒極速記帳（最穩、0 失敗率）</span>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold">✨ 推薦首選</span>
+        </div>
+        <p class="text-[#D1D5DB] leading-relaxed">
+          把本頁<b>「分享 ➔ 加入主畫面」</b>即可當成原生 iOS App 使用！不用設任何捷徑，直接選轉帳截圖辨識、一鍵貼上文字、或點選常用商家：
+        </p>
+        <input id="inAppOcrImageInput" type="file" accept="image/*" class="hidden" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button type="button" id="btnPickScreenshotOcr" class="btn-press py-3 px-3 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg">
+            <i class="fa-solid fa-camera-retro"></i>
+            <span id="lblPickScreenshotOcr">📸 直接選轉帳/刷卡截圖辨識</span>
+          </button>
+          <button type="button" id="btnPasteClipboardAuto" class="btn-press py-3 px-3 rounded-xl bg-[#0A84FF] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg">
+            <i class="fa-solid fa-paste"></i>
+            <span>📋 一鍵貼上剪貼簿文字入帳</span>
+          </button>
+        </div>
+        <div class="space-y-2 pt-1">
+          <div class="flex flex-wrap gap-1.5">
+            <button type="button" data-quick-merchant="7-ELEVEN" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">🏪 7-11</button>
+            <button type="button" data-quick-merchant="全家便利商店" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">🏪 全家</button>
+            <button type="button" data-quick-merchant="星巴克" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">☕ 星巴克</button>
+            <button type="button" data-quick-merchant="手搖飲" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">🧋 手搖飲</button>
+            <button type="button" data-quick-merchant="午餐/晚餐" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">🍱 午晚餐</button>
+            <button type="button" data-quick-merchant="UberEats" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">🛵 外送</button>
+            <button type="button" data-quick-merchant="全聯福利中心" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">🛒 全聯</button>
+            <button type="button" data-quick-merchant="中油加油" class="btn-press px-2.5 py-1.5 rounded-lg bg-white/[0.07] text-[#F5F5F7] text-xs">⛽ 加油</button>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <input id="quickAppleMerchant" type="text" class="input-fintech text-xs" placeholder="商家名稱" value="7-ELEVEN" />
+            <input id="quickAppleAmount" type="number" class="input-fintech text-xs font-bold tabular-nums" placeholder="輸入金額 ($)" value="" />
+            <input id="quickAppleCard" type="text" class="input-fintech text-xs" placeholder="卡片名稱" value="玉山 Unicard" />
+          </div>
+          <button type="button" id="btnSimulateApplePay" class="btn-press btn-primary w-full py-2.5 text-xs font-bold">
+            ⚡ 立即記下這筆刷卡消費
+          </button>
+        </div>
+      </div>
+
+      <!-- 通道 1：Apple Pay 零設定極簡版 (不用設 POST、不用設 JSON、不用打英文欄位！) -->
       <div class="apple-inset space-y-3 text-xs border border-amber-500/25">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <span class="font-semibold text-sm text-[#F5F5F7] flex items-center gap-2">
             <i class="fa-brands fa-apple text-amber-400"></i>
-            <span>通道 1：iOS 捷徑「Apple Pay 交易」全自動感應入帳</span>
+            <span>通道 1：Apple Pay 自動入帳（全新「零 JSON」10 秒設定版）</span>
           </span>
-          <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-medium border border-emerald-500/30">
-            🟢 雲端自動偵測待命中
-          </span>
+          <a href="shortcuts://" class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[11px] font-semibold border border-amber-500/40">
+            🚀 直接打開「捷徑 App」
+          </a>
         </div>
-
-        <div class="text-xs text-[#8E95A5] leading-relaxed">
-          手機「嗶」感應刷 Apple Pay 時，由 iOS「自動化 ➔ 交易」背景自動傳入雲端並直接扣減數位預算（支援中英文欄位 <code>amount/金額</code>、<code>merchant/商家</code>、<code>card_name/名稱或票卡</code>，且內建 10 分鐘防重鎖）：
+        <div class="text-xs text-[#D1D5DB] leading-relaxed">
+          現在<b>完全不用改 POST、不用選 JSON、也不用自己打 3 個英文欄位了！</b>維持預設 <code>GET</code> 貼上這條極簡網址即可：
         </div>
-
         <div class="bg-black/45 border border-white/[0.08] rounded-xl p-3 font-mono text-[11px] text-amber-300 select-all break-all leading-relaxed">
-          POST https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/webhook/apple-pay<br/>
-          <span class="text-[#8E95A5]">（亦相容舊網址 POST /api/notifications/webhook）</span><br/>
-          { "source": "apple_pay", "amount": 155, "merchant": "星巴克", "card_name": "玉山 Unicard" }
+          https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/q?a=<span class="bg-amber-500/25 text-white px-1 rounded">[點選：金額]</span>&amp;m=<span class="bg-sky-500/25 text-white px-1 rounded">[點選：商家]</span>
         </div>
-
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <button type="button" id="btnCopyApplePayUrl" class="btn-press btn-secondary py-2.5 px-3 text-xs">
-            📋 複製 Apple Pay 專用網址
+          <button type="button" id="btnCopyQuickZeroJsonUrl" class="btn-press btn-primary py-2.5 px-3 text-xs font-semibold">
+            📋 複製「零設定極簡網址」(/api/q?a=)
           </button>
-          <button type="button" id="btnCopyLegacyWebhookUrl" class="btn-press btn-secondary py-2.5 px-3 text-xs">
-            📋 複製舊版相容網址
+          <button type="button" id="btnCopyApplePayUrl" class="btn-press btn-secondary py-2.5 px-3 text-xs">
+            📋 複製傳統 Webhook 網址
           </button>
         </div>
-
-        <details class="group bg-black/35 rounded-xl border border-white/[0.08] p-3">
+        <details class="group bg-black/35 rounded-xl border border-white/[0.08] p-3" open>
           <summary class="cursor-pointer font-semibold text-amber-300 flex items-center justify-between">
-            <span>📖 點此展開：iPhone「Apple Pay 自動偵測」完整設定步驟</span>
+            <span>📖 只需 3 步（免設 POST / 免打 JSON 欄位）：</span>
             <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i>
           </summary>
-          <ol class="mt-2.5 space-y-2 text-[#D1D5DB] list-decimal list-inside leading-relaxed">
-            <li>打開 iPhone 內建<b>「捷徑 (Shortcuts)」App</b> ➔ 點底部<b>「自動化」</b>➔ 點右上角 <b>「＋」</b>。</li>
-            <li>往下滑點選<b>「交易 (Transaction)」</b>：
-              <div class="pl-4 text-[#8E95A5]">• 勾選你的所有卡片 ➔ 選擇<b>「立即執行」</b>（關閉執行時通知）➔ 點下一步。</div>
-            </li>
-            <li>點選<b>「新增空白自動化」</b>➔ 搜尋並加入動作<b>「取得 URL 內容 (Get Contents of URL)」</b>。</li>
-            <li>點擊藍色「URL」貼上上方複製的網址，點展開箭頭（顯示更多）：
-              <div class="pl-4 text-[#8E95A5]">
-                • <b>方法 (Method)</b>：選 <code>POST</code><br/>
-                • <b>要求主體 (Request Body)</b>：選 <code>JSON</code><br/>
-                • 點<b>「新增欄位 ➔ 文字」</b>建立以下 3 個欄位：<br/>
-                1. 左填 <code>amount</code> ➔ 右選變數<b>「捷徑輸入」</b>（點一下改選<b>「金額」</b>）<br/>
-                2. 左填 <code>merchant</code> ➔ 右選變數<b>「捷徑輸入」</b>（點一下改選<b>「商家」</b>）<br/>
-                3. 左填 <code>card_name</code> ➔ 右選變數<b>「捷徑輸入」</b>（點一下改選<b>「名稱或票卡」</b>）
-              </div>
-            </li>
+          <ol class="mt-2 space-y-1.5 text-[#D1D5DB] list-decimal list-inside leading-relaxed">
+            <li>複製上方<b>「零設定極簡網址」</b>，點<b>「🚀 直接打開捷徑 App」</b>➔ 底部<b>「自動化」</b>➔ <b>「＋」</b>➔ <b>「交易」</b>（勾選卡片＋選<b>「立即執行」</b>）。</li>
+            <li>點<b>「新增空白自動化」</b>➔ 加入<b>「取得 URL 內容 (Get Contents of URL)」</b>。</li>
+            <li>點藍色「URL」貼上網址（<code>.../api/q?a=</code>）➔ 在 <code>a=</code> 後點鍵盤上方選<b>「交易 (改選：金額)」</b>，再打 <code>&amp;m=</code> 選<b>「交易 (改選：商家)」</b>即完成！<b>（完全不用展開改 POST 或 JSON）</b></li>
           </ol>
         </details>
-
-        <div class="grid grid-cols-3 gap-2 pt-1">
-          <input id="quickAppleMerchant" type="text" class="input-fintech text-xs" placeholder="商家 (例: 星巴克)" value="星巴克" />
-          <input id="quickAppleAmount" type="number" class="input-fintech text-xs font-bold tabular-nums" placeholder="金額 ($)" value="155" />
-          <input id="quickAppleCard" type="text" class="input-fintech text-xs" placeholder="卡片名稱" value="玉山 Unicard" />
-        </div>
-        <button type="button" id="btnSimulateApplePay" class="btn-press btn-primary w-full py-2.5 text-xs">
-          🍎 立即模擬測試 Apple Pay 感應入帳
-        </button>
       </div>
 
       <!-- 通道 2：轉帳截圖 OCR -->
       <div class="apple-inset space-y-3.5 text-xs border border-[#0A84FF]/25">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="font-semibold text-sm text-[#F5F5F7]">📸 通道 2：轉帳【轉出／轉入】截圖辨識（相簿不留照片）</span>
+          <span class="font-semibold text-sm text-[#F5F5F7]">📸 通道 2：轉帳【轉出／轉入】截圖文字解析</span>
           <button type="button" id="btnCopyTransferOcrUrl" class="btn-press btn-secondary px-3 py-1.5 rounded-lg text-[11px]">
-            📋 複製轉帳 OCR 網址
+            📋 複製轉帳極簡網址 (/api/q)
           </button>
         </div>
 
         <details class="group bg-black/35 rounded-xl border border-white/[0.08] p-3">
           <summary class="cursor-pointer font-semibold text-sky-300 flex items-center justify-between">
-            <span>📖 點此展開：iPhone「敲背面兩下截圖記轉帳（相簿 0 照片）」設定步驟</span>
+            <span>📖 進階可選：敲機背兩下截圖捷徑（免打 JSON 欄位版）</span>
             <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i>
           </summary>
           <div class="mt-2.5 space-y-2 text-[#D1D5DB] leading-relaxed">
-            <div class="text-emerald-300 font-medium">💡 核心關鍵：不要按實體「電源鍵+音量鍵」！用捷徑內建截圖只會留在暫存記憶體，跑完自動消失，相簿絕對不會多出照片！</div>
+            <div class="text-emerald-300 font-medium">💡 提示：若不想設捷徑，直接用最上方綠色按鈕「📸 直接選轉帳/刷卡截圖辨識」即可！若想設敲機背兩下，也完全不用打 JSON 欄位：</div>
             <ol class="space-y-1.5 list-decimal list-inside">
-              <li>打開<b>「捷徑」App</b> ➔ 左下角「所有捷徑」➔ 點右上角 <b>「＋」</b>，命名為 <b>「轉帳記帳」</b>。</li>
-              <li><b>動作 1</b>：搜尋加入<b>「擷取螢幕畫面 (Take Screenshot)」</b><i>（千萬別加儲存到相簿）</i>。</li>
-              <li><b>動作 2</b>：搜尋加入<b>「從影像中擷取文字 (Extract Text from Image)」</b>。</li>
-              <li><b>動作 3</b>：搜尋加入<b>「取得 URL 內容 (Get Contents of URL)」</b>：
-                <div class="pl-4 text-[#8E95A5]">
-                  • <b>URL</b>：貼上 <code>https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/webhook/transfer-ocr</code><br/>
-                  • <b>方法</b>：<code>POST</code> ｜ <b>主體</b>：<code>JSON</code><br/>
-                  • 新增文字欄位 <code>raw_text</code> ➔ 右邊選變數<b>「來自影像的文字」</b><br/>
-                  • <i>（進階可選）</i>若想在截圖當下選分類，可在動作 2 後加「從選單中選擇」，多傳 <code>direction</code> (<code>OUT</code>/<code>IN</code>) 與 <code>flowType</code> (<code>EXPENSE</code> 一般消費 / <code>ADVANCE_OUT</code> 幫朋友代墊 / <code>ADVANCE_IN</code> 朋友還款 / <code>INTERNAL_TRANSFER</code> 內部互轉)。
-                </div>
-              </li>
-              <li><b>綁定敲手機背面兩下觸發</b>：打開 iPhone <b>「設定 ➔ 輔助使用 ➔ 觸控 ➔ 背面輕點 ➔ 點兩下」</b>，勾選剛建好的<b>「轉帳記帳」</b>！</li>
+              <li><b>動作 1</b>：加入<b>「擷取螢幕畫面」</b>。</li>
+              <li><b>動作 2</b>：加入<b>「從影像中擷取文字」</b>。</li>
+              <li><b>動作 3</b>：加入<b>「取得 URL 內容」</b>➔ 貼上網址 <code>https://anti-broke-finance-app.mr-haibaoseal.workers.dev/api/q</code> ➔ 展開選 <code>POST</code> ➔ 要求主體選<b>「檔案 (File)」</b>（<b>不要選 JSON！</b>）➔ 右邊點選<b>「來自影像的文字」</b>即可！</li>
             </ol>
           </div>
         </details>
