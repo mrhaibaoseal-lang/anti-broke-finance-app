@@ -1,0 +1,14 @@
+{
+  "name": "guardpay-v2",
+  "version": "2.0.0",
+  "description": "餘額守門員 GuardPay v2 — Apple Pay 原生捷徑 ＆ 轉帳截圖 OCR 智慧防破產記帳系統",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test tests/guardpay.test.js",
+    "deploy": "npx wrangler deploy"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

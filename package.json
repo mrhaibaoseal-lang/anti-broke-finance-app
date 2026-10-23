@@ -1,16 +1,14 @@
 {
-  "name": "anti-broke-finance-app",
-  "version": "1.0.0",
-  "description": "獨立運作的防破產與防衝動消費之智慧記帳系統（玉山簽帳卡雙重通知對帳引擎 + 班表薪資唯讀同步）",
+  "name": "guardpay-v2",
+  "version": "2.0.0",
+  "description": "餘額守門員 GuardPay v2 — Apple Pay 原生捷徑 ＆ 轉帳截圖 OCR 智慧防破產記帳系統",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "build": "node scripts/build.js",
-    "deploy": "npx wrangler deploy",
-    "test": "node --test tests/reconciliation.test.js"
+    "test": "node --test tests/guardpay.test.js",
+    "deploy": "npx wrangler deploy"
   },
   "engines": {
     "node": ">=22.5.0"
   }
 }
-

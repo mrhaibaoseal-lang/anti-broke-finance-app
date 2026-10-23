@@ -1,0 +1,16 @@
+{
+  "name": "anti-broke-finance-app",
+  "version": "1.0.0",
+  "description": "獨立運作的防破產與防衝動消費之智慧記帳系統（玉山簽帳卡雙重通知對帳引擎 + 班表薪資唯讀同步）",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "build": "node scripts/build.js",
+    "deploy": "npx wrangler deploy",
+    "test": "node --test tests/reconciliation.test.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
+

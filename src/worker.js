@@ -1,7 +1,5 @@
-import { connect } from 'cloudflare:sockets';
-import cloudState from './db/cloudState.js';
-
-globalThis.__cfSocketConnect = connect;
+import { createD1Adapter } from './db/dbAdapter.js';
+import { handleApiRequest } from './routes/router.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -18,24 +16,28 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
       try {
-        const result = await cloudState.handleCloudflareApiRequest(request, env);
+        let body = {};
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method.toUpperCase())) {
+          const raw = await request.text();
+          if (raw) {
+            try {
+              body = JSON.parse(raw);
+            } catch (_) {
+              body = { raw_text: raw };
+            }
+          }
+        }
+        const d1 = env?.DB || env?.anti_broke_finance_db;
+        const db = createD1Adapter(d1);
+        const result = await handleApiRequest(db, request.method, url.pathname, body, url.searchParams);
         return new Response(JSON.stringify(result.data), {
           status: result.status || 200,
-          headers: {
-            ...CORS_HEADERS,
-            'Content-Type': 'application/json; charset=utf-8'
-          }
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' }
         });
       } catch (err) {
         return new Response(
-          JSON.stringify({ ok: false, error: err?.message || 'Cloudflare Worker API 處理錯誤' }),
-          {
-            status: 400,
-            headers: {
-              ...CORS_HEADERS,
-              'Content-Type': 'application/json; charset=utf-8'
-            }
-          }
+          JSON.stringify({ ok: false, error: err?.message || 'Cloudflare Worker 處理錯誤' }),
+          { status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' } }
         );
       }
     }
@@ -60,23 +62,5 @@ export default {
     }
 
     return new Response('Not Found', { status: 404 });
-  },
-
-  async email(message, env) {
-    try {
-      const rawEmail = await new Response(message.raw).text();
-      const fakeReq = new Request('https://localhost/api/notifications/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: 'cloudflare_email_routing_auto',
-          emailUid: message.headers.get('message-id') || undefined,
-          rawEmail
-        })
-      });
-      await cloudState.handleCloudflareApiRequest(fakeReq, env);
-    } catch (err) {
-      console.error('[Cloudflare Email Auto-Parse Error]', err);
-    }
   }
 };

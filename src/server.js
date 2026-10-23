@@ -3,10 +3,8 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { getDb } = require('./db/database');
-const { handleApiRequest, ensureDemoTransactionsIfEmpty } = require('./routes/api');
-const { pollEsunEmailsViaImap } = require('./services/gmailImapService');
-const { syncCycleWithShiftData } = require('./services/survivalEngine');
+const { getDefaultDbAdapter } = require('./db/dbAdapter');
+const { handleApiRequest } = require('./routes/router');
 
 const PORT = Number(process.env.PORT) || 3088;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -35,7 +33,7 @@ function parseRequestBody(req) {
       try {
         resolve(JSON.parse(raw));
       } catch (_) {
-        resolve({ rawText: raw });
+        resolve({ raw_text: raw });
       }
     });
     req.on('error', reject);
@@ -67,12 +65,12 @@ const server = http.createServer(async (req, res) => {
     const pathname = urlObj.pathname;
 
     if (pathname.startsWith('/api/')) {
-      const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await parseRequestBody(req) : {};
-      const result = await handleApiRequest(req.method, pathname, body, urlObj.searchParams);
+      const body = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? await parseRequestBody(req) : {};
+      const db = getDefaultDbAdapter();
+      const result = await handleApiRequest(db, req.method, pathname, body, urlObj.searchParams);
       return sendJson(res, result.status || 200, result.data);
     }
 
-    // 靜態檔案服務 (支援 /shift-pay 同源開啟打工薪水帳 V2，共用 localStorage 免手動 JSON 同步)
     let filePath;
     if (pathname === '/' || pathname === '/index.html') {
       filePath = path.join(PUBLIC_DIR, 'index.html');
@@ -81,6 +79,7 @@ const server = http.createServer(async (req, res) => {
     } else {
       filePath = path.join(PUBLIC_DIR, pathname);
     }
+
     if (!filePath.startsWith(PUBLIC_DIR)) {
       res.writeHead(403);
       return res.end('Forbidden');
@@ -97,39 +96,19 @@ const server = http.createServer(async (req, res) => {
     });
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
-    console.error('[Server Error]', err);
+    console.error('[GuardPay v2 Server Error]', err);
     sendJson(res, 400, { ok: false, error: err.message || '伺服器處理錯誤' });
   }
 });
 
-let bgPollRunning = false;
-async function runBackgroundAutoSync() {
-  if (bgPollRunning) return;
-  bgPollRunning = true;
-  try {
-    const db = getDb();
-    syncCycleWithShiftData(db, { isAutoSync: true });
-    const settings = db.prepare('SELECT gmail_user, gmail_app_password FROM user_settings WHERE id = 1').get();
-    if (settings && settings.gmail_user && settings.gmail_app_password) {
-      await pollEsunEmailsViaImap(db);
-    }
-  } catch (_) {
-  } finally {
-    bgPollRunning = false;
-  }
-}
-
 if (require.main === module) {
-  getDb();
-  runBackgroundAutoSync();
-  setInterval(runBackgroundAutoSync, 60 * 1000).unref();
   server.listen(PORT, () => {
-    console.log(`====================================================================`);
-    console.log(`🛡️ 防破產與防衝動消費之智慧記帳系統 (Anti-Broke Finance Tracker)`);
-    console.log(`🚀 獨立伺服器已啟動：http://localhost:${PORT}`);
-    console.log(`📅 內建同源排班算薪水連動：http://localhost:${PORT}/shift-pay`);
-    console.log(`⚡ 背景全自動刷卡通知偵測 & 班表同步排程已啟動 (每 60 秒自動巡檢)`);
-    console.log(`====================================================================`);
+    console.log('====================================================================');
+    console.log('🛡️ 餘額守門員 GuardPay v2 (Clean Architecture Edition)');
+    console.log(`🚀 伺服器已啟動：http://localhost:${PORT}`);
+    console.log(`🍎 Apple Pay 捷徑端點：POST http://localhost:${PORT}/api/webhook/apple-pay`);
+    console.log(`📸 轉帳截圖 OCR 端點：POST http://localhost:${PORT}/api/webhook/transfer-ocr`);
+    console.log('====================================================================');
   });
 }
 

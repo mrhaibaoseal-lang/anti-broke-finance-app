@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap');
+
+:root {
+  color-scheme: dark;
+  --bg-canvas: #090A0F;
+  --bg-card: #151821;
+  --bg-card-hover: #191D28;
+  --bg-inset: #1D212D;
+  --bg-input: #232836;
+  --bg-input-focus: #1B202C;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text-primary: #F5F5F7;
+  --text-secondary: #D1D5DB;
+  --text-muted: #8E95A5;
+  --accent-primary: #0A84FF;
+  --accent-primary-hover: #2492FF;
+  --accent-primary-active: #006FE0;
+  --semantic-green: #34D399;
+  --semantic-amber: #FBBF24;
+  --semantic-red: #F87171;
+  --radius-card: 20px;
+  --radius-inset: 16px;
+  --radius-control: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg-canvas);
+  background-image: radial-gradient(ellipse 80% 50% at 50% -15%, rgba(10, 132, 255, 0.10), transparent 70%);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 深夜 (23:00~05:00) 與發薪日後 72h 高風險防禦模式 */
+body.high-risk-mode {
+  background-color: #0D090C;
+  background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(248, 113, 113, 0.14), transparent 70%);
+}
+
+body.high-risk-mode .bento-card {
+  border-color: rgba(248, 113, 113, 0.20);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}

@@ -1,0 +1,30 @@
+{
+  "name": "餘額守門員 GuardPay",
+  "short_name": "餘額守門員",
+  "description": "玉山簽帳卡雙重通知對帳引擎 × 現金悠遊卡水庫控制 × 72h防剁手守門員",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090A0F",
+  "theme_color": "#090A0F",
+  "lang": "zh-Hant",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
