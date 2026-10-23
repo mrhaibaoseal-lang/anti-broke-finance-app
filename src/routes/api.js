@@ -2,7 +2,7 @@
 
 const { getDb } = require('../db/database');
 const { getSurvivalDashboardMetrics, syncCycleWithShiftData } = require('../services/survivalEngine');
-const { processBankNotification, resolveGasTempHoldManually, markTransactionCanceled, scanGhostHolds } = require('../services/reconciliationEngine');
+const { processApplePayTransaction, processBankNotification, resolveGasTempHoldManually, markTransactionCanceled, scanGhostHolds } = require('../services/reconciliationEngine');
 const { getHighRiskModeStatus, evaluateImpulsePurchase, getCooldownCartSummary, fastForwardCooldownItem, resolveCooldownItem, getVampireAndSubscriptionRadar } = require('../services/impulseControlService');
 const { splitTransactionBill, settleSplitBill, getSplitBillsSummary, getWalletTankStatus, quickAdjustWalletTank, auditWalletTank, syncEsunAvailableBalance, splitUnknownGapTransaction, recordCashTransaction, recordManualAtmDeposit, deleteTransactionRecord } = require('../services/accountingPatchService');
 const { pollEsunEmailsViaImap, decodeEmailMimeToText, buildGoogleAppsScriptCode } = require('../services/gmailImapService');
@@ -21,47 +21,60 @@ function ensureDemoTransactionsIfEmpty(db) {
   const d2 = fmt(new Date(today.getTime() - 2 * 86400000));
   const d3 = fmt(new Date(today.getTime() - 3 * 86400000));
   const d4 = fmt(new Date(today.getTime() - 4 * 86400000));
-  const d15 = fmt(new Date(today.getTime() - 15 * 86400000)); // 超過 14 天的幽靈圈存示範
 
   // 0. 領現金後去 ATM 存入金融卡示範 (DEPOSIT 存款紀錄)
   processBankNotification(db, `【玉山銀行】存款通知：您的玉山帳戶於 ${d4} 12:10 於 ATM 現金存入 NT$15,000 元，可用餘額 NT$15,000 元。`, {
     timestamp: `${d4}T12:10:00+08:00`, referenceDate: d0
   });
 
-  // 1. 超過 14 天未請款的幽靈圈存示範
-  processBankNotification(db, `【玉山銀行】簽帳金融卡消費授權：${d15} 於「日本亞馬遜 AMAZON JP」刷卡 NT$890 元。`, {
-    timestamp: `${d15}T14:20:00+08:00`, referenceDate: d0
+  // 1. Apple Pay 原生捷徑消費示範（直接為 SETTLED 已確認交易）
+  processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 10,
+    merchant: '7-ELEVEN',
+    card_name: '玉山簽帳金融卡',
+    timestamp: `${d4}T08:15:00+08:00`,
+    referenceDate: d4
   });
-
-  // 2. 小額高頻消費 (觸發 7 天內 > 4 次低於 $200 隱形吸血鬼抓漏雷達)
-  processBankNotification(db, `【玉山Wallet】簽帳金融卡消費授權：${d4} 於「連加*7-ELEVEN」消費 NT$10 元（麥香紅茶）。`, {
-    timestamp: `${d4}T08:15:00+08:00`, referenceDate: d0
+  processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 65,
+    merchant: '50嵐',
+    card_name: '玉山簽帳金融卡',
+    timestamp: `${d3}T15:10:00+08:00`,
+    referenceDate: d3
   });
-  processBankNotification(db, `【玉山銀行】簽帳卡消費扣款：${d2} 商店請款「統一超商」（原交易日 ${d4}）實際扣款 NT$10 元。`, {
-    timestamp: `${d2}T04:10:00+08:00`, referenceDate: d0
+  processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 89,
+    merchant: '全家便利商店',
+    card_name: '玉山簽帳金融卡',
+    timestamp: `${d2}T23:40:00+08:00`,
+    referenceDate: d2
   });
-
-  processBankNotification(db, `【玉山Wallet】簽帳金融卡消費授權：${d3} 於「連加*50嵐」消費 NT$65 元。`, {
-    timestamp: `${d3}T15:10:00+08:00`, referenceDate: d0
+  processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 10,
+    merchant: '7-ELEVEN',
+    card_name: '玉山簽帳金融卡',
+    timestamp: `${d1}T09:05:00+08:00`,
+    referenceDate: d1
   });
-  processBankNotification(db, `【玉山Wallet】簽帳金融卡消費授權：${d2} 於「街口*全家便利商店」消費 NT$89 元。`, {
-    timestamp: `${d2}T23:40:00+08:00`, referenceDate: d0
+  processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 60,
+    merchant: '得正飲品',
+    card_name: '玉山簽帳金融卡',
+    timestamp: `${d0}T13:20:00+08:00`,
+    referenceDate: d0
   });
-  processBankNotification(db, `【玉山Wallet】簽帳金融卡消費授權：${d1} 於「連加*7-ELEVEN」消費 NT$10 元（麥香奶茶）。`, {
-    timestamp: `${d1}T09:05:00+08:00`, referenceDate: d0
-  });
-  processBankNotification(db, `【玉山Wallet】簽帳金融卡消費授權：${d0} 於「連加*得正飲品」消費 NT$60 元。`, {
-    timestamp: `${d0}T13:20:00+08:00`, referenceDate: d0
-  });
-
-  // 3. 中油 $1,500 加油站預授權白名單 (TEMP_HOLD)
-  processBankNotification(db, `【玉山銀行】簽帳金融卡消費授權：${d1} 於「台灣中油」刷卡授權 NT$1,500 元。`, {
-    timestamp: `${d1}T18:30:00+08:00`, referenceDate: d0
-  });
-
-  // 4. Steam 海外消費圈存 (等待通道 B 匯差 +1.5% 請款測試)
-  processBankNotification(db, `【玉山銀行】簽帳金融卡消費授權：${d2} 於「STEAM GAMES」刷卡 NT$1,000 元。`, {
-    timestamp: `${d2}T21:00:00+08:00`, referenceDate: d0
+  processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 155,
+    merchant: '星巴克',
+    card_name: '玉山 Unicard',
+    timestamp: `${d0}T15:00:00+08:00`,
+    referenceDate: d0
   });
 
   // 5. 72 小時冷靜池示範商品
@@ -148,14 +161,14 @@ function extractAnyBodyText(body = {}, searchParams = null) {
     return b || t;
   }
 
-  let directText = body.text || body.rawText || body.message || body.notification || body.body || body.input || body.content || body.transaction || body[''] || getParam('text') || getParam('message') || getParam('input') || '';
+  let directText = body.raw_text || body.rawText || body.text || body.message || body.notification || body.body || body.input || body.content || body.transaction || body[''] || getParam('raw_text') || getParam('text') || getParam('message') || getParam('input') || '';
 
-  if (body && typeof body === 'object') {
+  if (!directText && body && typeof body === 'object') {
     const extraVals = Object.entries(body)
-      .filter(([k, v]) => k !== '_clientState' && k !== 'source' && k !== 'timestamp' && k !== 'referenceDate' && k !== 'emailUid' && (typeof v === 'string' || typeof v === 'number'))
+      .filter(([k, v]) => !['_clientState', 'source', 'timestamp', 'referenceDate', 'emailUid', 'category', 'categoryTag', 'direction', 'card_name', 'cardName'].includes(k) && (typeof v === 'string' || typeof v === 'number'))
       .map(([, v]) => String(v).trim())
       .filter(Boolean);
-    if (extraVals.length > 0 && (!directText || extraVals.length > 1)) {
+    if (extraVals.length > 0) {
       directText = extraVals.join(' ');
     }
   }
@@ -168,28 +181,21 @@ function extractAnyBodyText(body = {}, searchParams = null) {
   return String(directText || '').trim();
 }
 
-function buildStructuredApplePayText(body = {}, searchParams = null) {
+function extractApplePayPayload(body = {}, searchParams = null) {
   const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
-  const merchant = String(body.merchant || body.store || body.shop || body.name || body.商家 || body.商店 || body.名稱 || getParam('merchant') || getParam('store') || getParam('name') || '').trim();
-  const rawAmt = String(body.amount ?? body.money ?? body.price ?? body.金額 ?? getParam('amount') ?? getParam('price') ?? '').trim();
-  const card = String(body.card || body.cardName || body.pass || body.卡片 || body.票卡 || getParam('card') || 'Apple Pay 綁定卡').trim();
+  const merchant = String(body.merchant || body.store || body.shop || body.name || body.商家 || body.商店 || body.名稱 || getParam('merchant') || getParam('store') || getParam('name') || '未知商店').trim();
+  const amount = body.amount ?? body.money ?? body.price ?? body.金額 ?? getParam('amount') ?? getParam('price') ?? 0;
+  const cardName = String(body.card_name || body.cardName || body.card || body.pass || body.卡片 || body.票卡 || getParam('card_name') || getParam('card') || 'Apple Pay').trim();
+  const timestamp = body.timestamp || getParam('timestamp') || new Date().toISOString();
 
-  if (merchant && rawAmt) {
-    const numMatch = rawAmt.replace(/,/g, '').match(/(\d+)(?:\.\d+)?/);
-    const cleanAmt = numMatch ? numMatch[1] : '0';
-    const refDt = body.timestamp ? new Date(body.timestamp) : new Date();
-    const dateStr = body.referenceDate
-      ? String(body.referenceDate).slice(0, 10).replace(/-/g, '/')
-      : `${refDt.getFullYear()}/${String(refDt.getMonth() + 1).padStart(2, '0')}/${String(refDt.getDate()).padStart(2, '0')}`;
-    const timeStr = `${String(refDt.getHours()).padStart(2, '0')}:${String(refDt.getMinutes()).padStart(2, '0')}`;
-    return `【Apple Pay 感應刷卡】您的 ${card} 於 ${dateStr} ${timeStr} 在「${merchant}」使用 Apple Pay 一般消費 NT$${cleanAmt} 元。`;
-  }
-
-  const directText = extractAnyBodyText(body, searchParams);
-  if (directText && !/Apple\s*Pay/i.test(directText)) {
-    return `【Apple Pay 感應刷卡】${directText}`;
-  }
-  return directText;
+  return {
+    source: 'apple_pay',
+    amount,
+    merchant,
+    card_name: cardName,
+    timestamp,
+    referenceDate: body.referenceDate || getParam('referenceDate') || undefined
+  };
 }
 
 let lastDashboardImapPollMs = 0;
@@ -214,22 +220,52 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     return { status: 200, data: { ok: true, ...buildFullDashboardSnapshot(db) } };
   }
 
-  // 1A. Apple Pay 感應刷卡專屬秒級自動入帳端點 (支援 iOS 捷徑「交易 Transaction」自動化 GET 網址參數或 POST JSON)
-  if ((method === 'GET' || method === 'POST') && pathname === '/api/notifications/apple-pay') {
-    const applePayText = buildStructuredApplePayText(body, searchParams);
-    const result = processBankNotification(db, applePayText, {
-      source: body.source || 'apple_pay_auto',
-      timestamp: body.timestamp || new Date().toISOString(),
-      referenceDate: body.referenceDate
+  // 1A. 【步驟 2：Apple Pay 專用接收端點】直接寫入 SETTLED 並更新當日安全額度
+  if ((method === 'GET' || method === 'POST') && (pathname === '/api/notifications/apple-pay' || pathname === '/api/transactions/apple-pay')) {
+    const applePayload = extractApplePayPayload(body, searchParams);
+    const result = processApplePayTransaction(db, applePayload, {
+      timestamp: applePayload.timestamp,
+      referenceDate: applePayload.referenceDate
     });
-    return { status: 200, data: { ok: true, result, dashboard: buildFullDashboardSnapshot(db) } };
+    const dashboard = buildFullDashboardSnapshot(db);
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        result,
+        dailySafeBudget: dashboard.survival?.budget?.dailySafeBudget ?? 0,
+        dashboard
+      }
+    };
   }
 
-  // 1B. 銀行與信用卡刷卡通知全自動接收與解析 (支援 GET/POST Webhook、Apple Pay、Google Apps Script、Email MIME 與批次陣列)
-  if ((method === 'GET' || method === 'POST') && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch')) {
-    const source = pathname.endsWith('/webhook')
-      ? (body.source || 'auto_webhook')
-      : (pathname.endsWith('/batch') ? (body.source || 'auto_batch_webhook') : (body.source || 'manual_ui'));
+  // 1B. 【Webhook 主接收端】支援：
+  //  - Apple Pay 乾淨 JSON ({ source: "apple_pay", amount, merchant, card_name, timestamp })
+  //  - 轉帳／收帳螢幕 OCR 文字 ({ raw_text, category: "EXPENSE" | "ADVANCE" | "TRANSFER" }) 與銀行轉帳/存款通知
+  //  - 自動攔截並忽略所有含「簽帳、消費、授權、卡號」等字眼的銀行刷卡通知
+  if ((method === 'GET' || method === 'POST') && (pathname === '/api/notifications/parse' || pathname === '/api/notifications/webhook' || pathname === '/api/notifications/batch' || pathname === '/api/transactions/transfer')) {
+    const getParam = key => (searchParams && typeof searchParams.get === 'function') ? searchParams.get(key) : null;
+    const reqSource = String(body.source || getParam('source') || (
+      pathname.endsWith('/webhook') ? 'auto_webhook' : (pathname.endsWith('/batch') ? 'auto_batch_webhook' : 'manual_ui')
+    )).trim();
+
+    if (reqSource === 'apple_pay' || reqSource === 'apple_pay_auto') {
+      const applePayload = extractApplePayPayload(body, searchParams);
+      const result = processApplePayTransaction(db, applePayload, {
+        timestamp: applePayload.timestamp,
+        referenceDate: applePayload.referenceDate
+      });
+      const dashboard = buildFullDashboardSnapshot(db);
+      return {
+        status: 200,
+        data: {
+          ok: true,
+          result,
+          dailySafeBudget: dashboard.survival?.budget?.dailySafeBudget ?? 0,
+          dashboard
+        }
+      };
+    }
 
     const batchList = Array.isArray(body.notifications)
       ? body.notifications
@@ -238,14 +274,28 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
     if (batchList && batchList.length > 0) {
       const results = [];
       for (const item of batchList) {
-        const itemObj = typeof item === 'string' ? { text: item } : (item || {});
+        const itemObj = typeof item === 'string' ? { raw_text: item } : (item || {});
+        if (itemObj.source === 'apple_pay' || itemObj.source === 'apple_pay_auto') {
+          try {
+            const r = processApplePayTransaction(db, extractApplePayPayload(itemObj), {
+              timestamp: itemObj.timestamp || new Date().toISOString(),
+              referenceDate: itemObj.referenceDate || body.referenceDate
+            });
+            results.push(r);
+          } catch (_) {}
+          continue;
+        }
         const text = itemObj.rawEmail
           ? decodeEmailMimeToText(itemObj.rawEmail)
-          : ((itemObj.merchant && itemObj.amount) ? buildStructuredApplePayText(itemObj) : extractAnyBodyText(itemObj));
-        if (!String(text).trim()) continue;
+          : extractAnyBodyText(itemObj);
+        if (!String(text).trim() && !itemObj.amount) continue;
         try {
           const r = processBankNotification(db, text, {
-            source: itemObj.source || source,
+            source: itemObj.source || reqSource,
+            category: itemObj.category || body.category,
+            direction: itemObj.direction || body.direction,
+            amount: itemObj.amount,
+            merchant: itemObj.merchant || itemObj.debtor_name || itemObj.debtorName,
             emailUid: itemObj.emailUid || itemObj.messageId || itemObj.uid,
             timestamp: itemObj.timestamp || new Date().toISOString(),
             referenceDate: itemObj.referenceDate || body.referenceDate
@@ -253,6 +303,7 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
           results.push(r);
         } catch (_) {}
       }
+      const dashboard = buildFullDashboardSnapshot(db);
       return {
         status: 200,
         data: {
@@ -260,23 +311,35 @@ async function handleApiRequest(method, pathname, body = {}, searchParams, optio
           processedCount: results.length,
           results,
           result: results[results.length - 1] || null,
-          dashboard: buildFullDashboardSnapshot(db)
+          dailySafeBudget: dashboard.survival?.budget?.dailySafeBudget ?? 0,
+          dashboard
         }
       };
     }
 
     const rawText = body.rawEmail
       ? decodeEmailMimeToText(body.rawEmail)
-      : ((body.merchant && body.amount)
-          ? buildStructuredApplePayText(body, searchParams)
-          : extractAnyBodyText(body, searchParams));
+      : extractAnyBodyText(body, searchParams);
     const result = processBankNotification(db, rawText, {
-      source,
+      source: reqSource,
+      category: body.category || getParam('category'),
+      direction: body.direction || getParam('direction'),
+      amount: body.amount || getParam('amount'),
+      merchant: body.merchant || body.debtor_name || body.debtorName || getParam('merchant'),
       emailUid: body.emailUid || body.messageId || body.uid,
       timestamp: body.timestamp || new Date().toISOString(),
       referenceDate: body.referenceDate
     });
-    return { status: 200, data: { ok: true, result, dashboard: buildFullDashboardSnapshot(db) } };
+    const dashboard = buildFullDashboardSnapshot(db);
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        result,
+        dailySafeBudget: dashboard.survival?.budget?.dailySafeBudget ?? 0,
+        dashboard
+      }
+    };
   }
 
   // 2. Gmail IMAP 主動與背景自動掃描

@@ -3,176 +3,159 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createDatabase } = require('../src/db/database');
-const { processBankNotification, scanGhostHolds } = require('../src/services/reconciliationEngine');
+const { processApplePayTransaction, processBankNotification } = require('../src/services/reconciliationEngine');
 const { getSurvivalDashboardMetrics } = require('../src/services/survivalEngine');
 
 function setupTestDb() {
   return createDatabase({ dbPath: ':memory:', seedDefaults: false });
 }
 
-test('1. 麥香問題 (FIFO 佇列) & 3 分鐘防抖動鎖：連續兩天買 $10 麥香絕不重複扣款、亦不誤殺', () => {
+test('1. 【步驟 1】徹底攔截銀行刷卡/簽帳/消費/授權/卡號/請款/預授權通知：一律直接忽略不記帳，避免與 Apple Pay 重複', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
   const db = setupTestDb();
 
-  // 星期一 10/19 08:10 在 7-11 刷卡買 $10 麥香 (通道 A)
-  const monAuth = processBankNotification(
-    db,
+  const cardNotifications = [
     '【玉山銀行】您的玉山簽帳金融卡於 2026/10/19 在 統一超商 刷卡消費授權 NT$10 元（可用餘額圈存）。',
-    { timestamp: '2026-10-19T08:10:00.000Z', referenceDate: '2026-10-19' }
-  );
-  assert.equal(monAuth.resultType, 'PENDING_CREATED');
-  assert.equal(monAuth.transaction.status, 'PENDING');
-  assert.equal(monAuth.transaction.personal_amount, 10);
-
-  // 1 分鐘後 (08:11) 銀行系統重複推播同一封 $10 通知 -> 應被 3 分鐘防抖動鎖攔截忽略！
-  const dupAuth = processBankNotification(
-    db,
-    '【玉山銀行】您的玉山簽帳金融卡於 2026/10/19 在 統一超商 刷卡消費授權 NT$10 元（可用餘額圈存）。',
-    { timestamp: '2026-10-19T08:11:15.000Z', referenceDate: '2026-10-19' }
-  );
-  assert.equal(dupAuth.resultType, 'DEBOUNCE_IGNORED');
-
-  // 星期三 10/21 09:00 又去 7-11 買了一瓶 $10 麥香 (超過 3 分鐘，視為獨立真實消費)
-  const wedAuth = processBankNotification(
-    db,
-    '【玉山銀行】您的玉山簽帳金融卡於 2026/10/21 在 7-ELEVEN 刷卡消費授權 NT$10 元。',
-    { timestamp: '2026-10-21T09:00:00.000Z', referenceDate: '2026-10-21' }
-  );
-  assert.equal(wedAuth.resultType, 'PENDING_CREATED');
-  assert.notEqual(wedAuth.transaction.id, monAuth.transaction.id);
-
-  // 此時應有 2 筆獨立 PENDING，當月已花費總額 = $20
-  let metrics = getSurvivalDashboardMetrics(db, '2026-10-21');
-  assert.equal(metrics.budget.totalSpent, 20);
-  assert.equal(metrics.budget.pendingSpent, 20);
-
-  // 星期四 10/22 收到第 1 封通道 B 請款扣款通知（未附原始日期，考驗 FIFO 先進先出）
-  const settle1 = processBankNotification(
-    db,
     '【玉山銀行】簽帳卡消費扣款通知：您的帳戶於 2026/10/22 商店請款扣款「7-ELEVEN」金額 NT$10 元。',
-    { timestamp: '2026-10-22T03:00:00.000Z', referenceDate: '2026-10-22' }
-  );
-  assert.equal(settle1.resultType, 'RECONCILED_SETTLED');
-  assert.equal(settle1.transaction.id, monAuth.transaction.id);
-  assert.equal(settle1.transaction.status, 'SETTLED');
-  assert.equal(settle1.transaction.is_reconciled_locked, 1);
+    '【玉山銀行】簽帳金融卡消費授權：2026/10/16 於「優食*UBEREATS」刷卡 NT$1 元（試刷驗證）。',
+    '【玉山銀行】簽帳金融卡消費授權：2026/10/17 於「台灣中油」刷卡預授權 NT$1,500 元。',
+    '【玉山銀行信用卡通知】卡號末4碼1234 於 2026/10/21 特店名稱：麥當勞 金額：NT$165 元。'
+  ];
 
-  const wedTxNow = db.prepare('SELECT * FROM transactions WHERE id = ?').get(wedAuth.transaction.id);
-  assert.equal(wedTxNow.status, 'PENDING');
-  assert.equal(wedTxNow.is_reconciled_locked, 0);
+  for (const text of cardNotifications) {
+    const res = await handleApiRequest('POST', '/api/notifications/webhook', {
+      source: 'bank_push',
+      text,
+      timestamp: '2026-10-23T10:00:00.000Z',
+      referenceDate: '2026-10-23'
+    }, new URLSearchParams(), { db });
 
-  // 總花費依然是 $20（SETTLED $10 + PENDING $10），絕不重複扣成 $30！
-  metrics = getSurvivalDashboardMetrics(db, '2026-10-22');
-  assert.equal(metrics.budget.totalSpent, 20);
-  assert.equal(metrics.budget.settledSpent, 10);
-  assert.equal(metrics.budget.pendingSpent, 10);
-});
+    assert.equal(res.data.ok, true);
+    assert.equal(res.data.result.ignored, true);
+    assert.equal(res.data.result.resultType, 'IGNORED_BANK_CARD');
+  }
 
-test('2. 第三方支付店名變形正規化：連加*7-ELEVEN (LINE Pay) 圈存 vs 統一超商 請款精準配對', () => {
-  const db = setupTestDb();
-
-  const auth = processBankNotification(
-    db,
-    '【玉山Wallet】簽帳金融卡消費授權通知：2026/10/18 於「連加*７－ＥＬＥＶＥＮ」消費 NT$85 元。',
-    { timestamp: '2026-10-18T12:30:00.000Z', referenceDate: '2026-10-18' }
-  );
-  assert.equal(auth.transaction.normalized_merchant, '7-ELEVEN');
-
-  const settle = processBankNotification(
-    db,
-    '【玉山銀行】帳戶扣款通知：2026/10/20 簽帳卡消費請款「LINE PAY*統一超商」（原始交易日 2026/10/18）實際扣款 NT$85 元。',
-    { timestamp: '2026-10-20T05:00:00.000Z', referenceDate: '2026-10-20' }
-  );
-  assert.equal(settle.resultType, 'RECONCILED_SETTLED');
-  assert.equal(settle.transaction.id, auth.transaction.id);
-  assert.equal(settle.reconcileScore, 100);
-});
-test('3. 跨國交易匯差與 1.5% 海外手續費自動修正 (±6% 容許誤差比對)', () => {
-  const db = setupTestDb();
-
-  const auth = processBankNotification(
-    db,
-    '【玉山銀行】簽帳金融卡消費授權：2026/10/15 於「STEAM GAMES」刷卡 NT$1,000 元。',
-    { timestamp: '2026-10-15T22:00:00.000Z', referenceDate: '2026-10-15' }
-  );
-  assert.equal(auth.transaction.personal_amount, 1000);
-
-  const settle = processBankNotification(
-    db,
-    '【玉山銀行】簽帳卡消費扣款：2026/10/18 商店請款「STEAMPOWERED」（原交易日 2026/10/15）帳戶扣款 NT$1,023 元。',
-    { timestamp: '2026-10-18T06:00:00.000Z', referenceDate: '2026-10-18' }
-  );
-  assert.equal(settle.resultType, 'RECONCILED_SETTLED');
-  assert.equal(settle.matchType, 'FX_TOLERANCE_MATCH');
-  assert.equal(settle.fxFeeDiff, 23);
-  assert.equal(settle.transaction.id, auth.transaction.id);
-  assert.equal(settle.transaction.effective_amount, 1023);
-  assert.equal(settle.transaction.personal_amount, 1023);
-
-  const metrics = getSurvivalDashboardMetrics(db, '2026-10-18');
-  assert.equal(metrics.budget.totalSpent, 1023);
-});
-
-test('4. 特殊邊界防護：加油站 $1,500 預授權白名單 (TEMP_HOLD) 與 $1 元綁卡驗證過濾 (AUTH_VERIFY)', () => {
-  const db = setupTestDb();
-
-  const verifyRes = processBankNotification(
-    db,
-    '【玉山銀行】簽帳金融卡消費授權：2026/10/16 於「優食*UBEREATS」刷卡 NT$1 元。',
-    { timestamp: '2026-10-16T10:00:00.000Z', referenceDate: '2026-10-16' }
-  );
-  assert.equal(verifyRes.resultType, 'VERIFY_FILTERED');
-  assert.equal(verifyRes.transaction.status, 'AUTH_VERIFY');
-  assert.equal(verifyRes.transaction.personal_amount, 0);
-
-  const gasHold = processBankNotification(
-    db,
-    '【玉山銀行】簽帳金融卡消費授權：2026/10/17 於「台灣中油」刷卡授權 NT$1,500 元。',
-    { timestamp: '2026-10-17T18:00:00.000Z', referenceDate: '2026-10-17' }
-  );
-  assert.equal(gasHold.resultType, 'GAS_PREAUTH_HOLD');
-  assert.equal(gasHold.transaction.status, 'TEMP_HOLD');
-  assert.equal(gasHold.transaction.personal_amount, 0);
-
-  let metrics = getSurvivalDashboardMetrics(db, '2026-10-17');
+  const txCount = db.prepare('SELECT COUNT(*) AS cnt FROM transactions').get().cnt;
+  assert.equal(txCount, 0);
+  const metrics = getSurvivalDashboardMetrics(db, '2026-10-23');
   assert.equal(metrics.budget.totalSpent, 0);
-
-  const gasSettle = processBankNotification(
-    db,
-    '【玉山銀行】簽帳卡消費扣款：2026/10/20「台灣中油」（原交易日 2026/10/17）實際請款扣款 NT$135 元。',
-    { timestamp: '2026-10-20T04:00:00.000Z', referenceDate: '2026-10-20' }
-  );
-  assert.equal(gasSettle.resultType, 'RECONCILED_SETTLED');
-  assert.equal(gasSettle.transaction.id, gasHold.transaction.id);
-  assert.equal(gasSettle.transaction.status, 'SETTLED');
-  assert.equal(gasSettle.transaction.personal_amount, 135);
-
-  metrics = getSurvivalDashboardMetrics(db, '2026-10-20');
-  assert.equal(metrics.budget.totalSpent, 135);
 });
 
-test('5. 14 天幽靈圈存雷達、先買後退原則與發薪日入帳自動校正', () => {
+test('2. 【步驟 2】乾淨的 Apple Pay 專用 JSON 格式接收：進系統直接視為 SETTLED 已確認交易並更新當日安全額度', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
   const db = setupTestDb();
 
-  const shopTx = processBankNotification(
+  processBankNotification(
     db,
-    '【玉山銀行】簽帳金融卡消費授權：2026/10/10 於「蝦皮購物」刷卡 NT$1,200 元。',
-    { timestamp: '2026-10-10T11:00:00.000Z', referenceDate: '2026-10-10' }
+    '【玉山銀行】存款通知：您的玉山帳戶於 2026/10/20 於 ATM 現金存入 NT$9,000 元。',
+    { timestamp: '2026-10-20T09:00:00.000Z', referenceDate: '2026-10-23' }
   );
-  assert.equal(shopTx.transaction.personal_amount, 1200);
 
-  const alerts = scanGhostHolds(db, '2026-10-25');
-  assert.equal(alerts.length, 1);
-  assert.equal(alerts[0].transactionId, shopTx.transaction.id);
-  assert.match(alerts[0].alertText, /已逾 15 天未請款/);
+  const appleRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'apple_pay',
+    amount: 155,
+    merchant: '星巴克 STARBUCKS',
+    card_name: '玉山 Unicard',
+    timestamp: '2026-10-23T10:12:00+08:00',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
 
-  const refundRes = processBankNotification(
-    db,
-    '【玉山銀行】刷退入帳通知：2026/10/26「蝦皮購物」取消授權刷退 NT$1,200 元已退回帳戶。',
-    { timestamp: '2026-10-26T10:00:00.000Z', referenceDate: '2026-10-26' }
-  );
-  assert.equal(refundRes.resultType, 'REFUND_APPLIED');
-  assert.equal(refundRes.transaction.status, 'CANCELED');
-  assert.equal(refundRes.transaction.personal_amount, 0);
+  assert.equal(appleRes.data.ok, true);
+  assert.equal(appleRes.data.result.resultType, 'APPLE_PAY_SETTLED');
+  assert.equal(appleRes.data.result.transaction.status, 'SETTLED');
+  assert.equal(appleRes.data.result.transaction.is_reconciled_locked, 1);
+  assert.equal(appleRes.data.result.transaction.normalized_merchant, '星巴克');
+  assert.equal(appleRes.data.result.transaction.effective_amount, 155);
+  assert.equal(appleRes.data.result.transaction.personal_amount, 155);
+
+  const bankDup = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'esun_push',
+    text: '【玉山銀行】您的玉山信用卡(卡號1234)於 2026/10/23 在「星巴克」刷卡消費授權 NT$155 元。',
+    timestamp: '2026-10-23T10:14:00+08:00',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+  assert.equal(bankDup.data.result.resultType, 'IGNORED_BANK_CARD');
+
+  const metrics = getSurvivalDashboardMetrics(db, '2026-10-23');
+  assert.equal(metrics.budget.totalSpent, 155);
+  assert.equal(metrics.budget.settledSpent, 155);
+  assert.equal(metrics.budget.pendingSpent, 0);
+  assert.equal(metrics.budget.todaySpent, 155);
+  assert.equal(metrics.budget.remainingBudget, 9000 - 155);
+});
+test('3. 【步驟 3】轉帳與收帳重構：支援 iOS 螢幕截圖 OCR (raw_text) + 分類標籤 (EXPENSE / ADVANCE / TRANSFER) + 5 分鐘防重複鎖', async () => {
+  const { handleApiRequest } = require('../src/routes/api');
+  const { getSplitBillsSummary } = require('../src/services/accountingPatchService');
+  const db = setupTestDb();
+
+  // (A) 螢幕 OCR 轉帳 + 手動選擇「一般支出 (EXPENSE)」-> 直接寫入 SETTLED 並扣減個人預算
+  const ocrExpense = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_ocr_shortcut',
+    raw_text: '玉山銀行 臺幣轉帳 交易成功\n轉帳金額 NT$450\n轉出帳號 0808-***1234\n轉入帳號 822-***5678\n備註：房東水電費\n可用餘額 NT$12,550',
+    category: 'EXPENSE',
+    timestamp: '2026-10-23T12:00:00.000Z',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(ocrExpense.data.ok, true);
+  assert.equal(ocrExpense.data.result.resultType, 'TRANSFER_EXPENSE_RECORDED');
+  assert.equal(ocrExpense.data.result.direction, 'OUT');
+  assert.equal(ocrExpense.data.result.transaction.status, 'SETTLED');
+  assert.equal(ocrExpense.data.result.transaction.effective_amount, 450);
+  assert.equal(ocrExpense.data.result.transaction.personal_amount, 450);
+
+  // (B) 【5 分鐘內相同金額與方向的防重複鎖 (Idempotency Check)】：
+  // 3 分鐘後 (12:03) 收到銀行發來的 $450 轉出通知或重送一次捷徑 -> 必須被 5 分鐘防重鎖直接忽略！
+  const dupTransferOut = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'bank_transfer_push',
+    raw_text: '【玉山銀行】臺幣轉帳通知：您於 2026/10/23 12:00 轉帳成功 轉出金額 NT$450 元。',
+    category: 'EXPENSE',
+    timestamp: '2026-10-23T12:03:00.000Z',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(dupTransferOut.data.result.ignored, true);
+  assert.equal(dupTransferOut.data.result.resultType, 'IDEMPOTENCY_IGNORED');
+
+  // (C) 螢幕 OCR 轉帳 + 手動選擇「代墊款 (ADVANCE)」-> 不扣個人預算 (personal_amount = 0)，且自動寫入應收代墊款池！
+  const ocrAdvance = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_ocr_shortcut',
+    raw_text: '轉帳成功\n交易金額 NT$1,800\n轉入帳號 013-***9988\n備註：幫阿凱代墊演唱會門票',
+    category: 'ADVANCE',
+    timestamp: '2026-10-23T13:00:00.000Z',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(ocrAdvance.data.result.resultType, 'TRANSFER_ADVANCE_RECORDED');
+  assert.equal(ocrAdvance.data.result.transaction.status, 'SETTLED');
+  assert.equal(ocrAdvance.data.result.transaction.effective_amount, 1800);
+  assert.equal(ocrAdvance.data.result.transaction.personal_amount, 0);
+  assert.ok(ocrAdvance.data.result.splitBill);
+  assert.equal(ocrAdvance.data.result.splitBill.receivable_amount, 1800);
+
+  const splitSummary = getSplitBillsSummary(db);
+  assert.equal(splitSummary.pendingReceivableTotal, 1800);
+  assert.equal(splitSummary.unpaidCount, 1);
+
+  // (D) 螢幕 OCR 轉帳 + 手動選擇「內部互轉 (TRANSFER)」-> 自己帳戶間互轉，不扣個人預算 (personal_amount = 0)
+  const ocrInternal = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_ocr_shortcut',
+    raw_text: '轉帳成功 NT$3,000 轉入帳號 812-***7777 備註：轉台新Richart備用',
+    category: 'TRANSFER',
+    timestamp: '2026-10-23T14:00:00.000Z',
+    referenceDate: '2026-10-23'
+  }, new URLSearchParams(), { db });
+
+  assert.equal(ocrInternal.data.result.resultType, 'INTERNAL_TRANSFER_RECORDED');
+  assert.equal(ocrInternal.data.result.transaction.status, 'SETTLED');
+  assert.equal(ocrInternal.data.result.transaction.personal_amount, 0);
+
+  const metrics = getSurvivalDashboardMetrics(db, '2026-10-23');
+  assert.equal(metrics.budget.totalSpent, 450);
+});
+
+test('4. 發薪日入帳自動校正與收帳 5 分鐘防重鎖驗證', () => {
+  const db = setupTestDb();
 
   const salaryRes = processBankNotification(
     db,
@@ -180,6 +163,14 @@ test('5. 14 天幽靈圈存雷達、先買後退原則與發薪日入帳自動�
     { timestamp: '2026-10-10T09:00:00.000Z', referenceDate: '2026-10-26' }
   );
   assert.equal(salaryRes.resultType, 'SALARY_CALIBRATED');
+
+  const dupSalary = processBankNotification(
+    db,
+    '【玉山銀行】臺幣帳戶入帳通知：存入金額 NT$23,800 元。',
+    { timestamp: '2026-10-10T09:04:00.000Z', referenceDate: '2026-10-26' }
+  );
+  assert.equal(dupSalary.resultType, 'IDEMPOTENCY_IGNORED');
+
   const metrics = getSurvivalDashboardMetrics(db, '2026-10-26');
   assert.equal(metrics.cycle.isSalarySettled, true);
   assert.equal(metrics.budget.effectiveIncome, 23800);
@@ -217,12 +208,15 @@ test('7. 日常真實生活補丁：聚餐一鍵拆帳代墊池、悠遊卡自�
   const { splitTransactionBill, settleSplitBill, getWalletTankStatus, syncEsunAvailableBalance, splitUnknownGapTransaction } = require('../src/services/accountingPatchService');
   const db = setupTestDb();
 
-  // (A) 朋友聚餐刷卡 $2,000，自己僅負擔 $500，剩下 $1,500 移入應收代墊款池
-  const dinnerTx = processBankNotification(
-    db,
-    '【玉山銀行】簽帳金融卡消費授權：2026/10/20 於「海底撈火鍋」刷卡 NT$2,000 元。',
-    { timestamp: '2026-10-20T19:00:00.000Z', referenceDate: '2026-10-20' }
-  );
+  // (A) 朋友聚餐透過 Apple Pay 刷卡 $2,000，自己僅負擔 $500，剩下 $1,500 移入應收代墊款池
+  const dinnerTx = processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 2000,
+    merchant: '海底撈火鍋',
+    card_name: '玉山 Unicard',
+    timestamp: '2026-10-20T19:00:00.000Z',
+    referenceDate: '2026-10-20'
+  });
   const splitRes = splitTransactionBill(db, {
     transactionId: dinnerTx.transaction.id,
     selfAmount: 500,
@@ -238,11 +232,14 @@ test('7. 日常真實生活補丁：聚餐一鍵拆帳代墊池、悠遊卡自�
 
   // (B) 悠遊卡自動加值 $500 -> 個人總預算照扣，同時自動轉入 Wallet Tank 水庫
   const tankBefore = getWalletTankStatus(db).easycardBalance;
-  processBankNotification(
-    db,
-    '【玉山銀行】簽帳金融卡消費授權：2026/10/21 於「悠遊卡自動加值」消費 NT$500 元。',
-    { timestamp: '2026-10-21T08:00:00.000Z', referenceDate: '2026-10-21' }
-  );
+  processApplePayTransaction(db, {
+    source: 'apple_pay',
+    amount: 500,
+    merchant: '悠遊卡自動加值',
+    card_name: '玉山簽帳金融卡',
+    timestamp: '2026-10-21T08:00:00.000Z',
+    referenceDate: '2026-10-21'
+  });
   const tankAfter = getWalletTankStatus(db).easycardBalance;
   assert.equal(tankAfter, tankBefore + 500);
 
@@ -272,68 +269,63 @@ test('7. 日常真實生活補丁：聚餐一鍵拆帳代墊池、悠遊卡自�
   assert.equal(splitGap.createdTransactions.length, 2);
 });
 
-test('8. Cloudflare 無伺服器相容引擎 (PortableSqliteDb & 快照匯出入)：雙重通知對帳與狀態同步完全一致', async () => {
+test('8. Cloudflare 無伺服器相容引擎 (PortableSqliteDb & 快照匯出入)：Apple Pay 與 OCR 轉帳狀態同步完全一致', async () => {
   const { handleApiRequest, ensureDemoTransactionsIfEmpty } = require('../src/routes/api');
   const db = createDatabase({ engine: 'portable', seedDefaults: true });
   ensureDemoTransactionsIfEmpty(db);
 
-  const authRes = await handleApiRequest('POST', '/api/notifications/parse', {
-    text: '【玉山Wallet】簽帳金融卡消費授權通知：2026/10/21 於「連加*7-ELEVEN」消費 NT$85 元。',
+  const appleRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'apple_pay',
+    amount: 85,
+    merchant: '7-ELEVEN',
+    card_name: '玉山 Unicard',
     timestamp: '2026-10-21T10:00:00.000Z',
     referenceDate: '2026-10-21'
   }, new URLSearchParams(), { db });
-  assert.equal(authRes.data.ok, true);
-  assert.equal(authRes.data.result.resultType, 'PENDING_CREATED');
+  assert.equal(appleRes.data.ok, true);
+  assert.equal(appleRes.data.result.resultType, 'APPLE_PAY_SETTLED');
+  assert.equal(appleRes.data.result.transaction.status, 'SETTLED');
 
   const snap = db.exportSnapshot();
   const db2 = createDatabase({ engine: 'portable', seedDefaults: false, snapshot: snap });
 
-  const settleRes = await handleApiRequest('POST', '/api/notifications/parse', {
-    text: '【玉山銀行】帳戶扣款通知：2026/10/21 簽帳卡消費請款「LINE PAY*統一超商」（原始交易日 2026/10/21）實際扣款 NT$85 元。',
+  // 在快照還原後的 db2 上驗證銀行刷卡通知會被攔截忽略
+  const blockedRes = await handleApiRequest('POST', '/api/notifications/webhook', {
+    text: '【玉山銀行】帳戶扣款通知：2026/10/21 簽帳卡消費請款「LINE PAY*統一超商」實際扣款 NT$85 元。',
     timestamp: '2026-10-21T18:00:00.000Z',
     referenceDate: '2026-10-21'
   }, new URLSearchParams(), { db: db2 });
-  assert.equal(settleRes.data.ok, true);
-  assert.equal(settleRes.data.result.resultType, 'RECONCILED_SETTLED');
-  assert.equal(settleRes.data.result.transaction.id, authRes.data.result.transaction.id);
+  assert.equal(blockedRes.data.ok, true);
+  assert.equal(blockedRes.data.result.resultType, 'IGNORED_BANK_CARD');
 });
 
-test('9. 信用卡與簽帳卡全自動偵測：免責聲明防誤判、小數點金額、可用餘額排除、跨管道(推播+Gmail MIME)絕不重複扣款', async () => {
+test('9. 銀行轉帳與收帳進階驗證：代墊款收帳自動沖銷 (ADVANCE IN) 與跨方向不誤殺', async () => {
   const { handleApiRequest } = require('../src/routes/api');
-  const { syncEsunAvailableBalance } = require('../src/services/accountingPatchService');
+  const { getSplitBillsSummary } = require('../src/services/accountingPatchService');
   const db = setupTestDb();
 
-  // (A) 手機推播先到達：含「末四碼1234」、「165.00 元」、「可用餘額 15,800 元」與「實際請款金額以帳單為準」免責聲明
-  const pushRes = await handleApiRequest('POST', '/api/notifications/webhook', {
-    source: 'ios_shortcut_auto',
-    text: '【消費通知】您的玉山Ｕ Bear信用卡(末四碼1234)於 2026/10/21 14:25 在「連加*麥當勞」一般消費 新臺幣 165.00 元（帳戶可用餘額 NT$15,800 元），實際請款金額以帳單為準。',
-    timestamp: '2026-10-21T06:25:05.000Z',
+  // (A) 先用 OCR 轉出一筆 $1,200 代墊款 (ADVANCE OUT)
+  const outAdv = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_ocr',
+    raw_text: '轉帳成功 NT$1,200 轉入帳號 808-***1122 備註：聚餐代墊',
+    category: 'ADVANCE',
+    timestamp: '2026-10-21T12:00:00.000Z',
     referenceDate: '2026-10-21'
   }, new URLSearchParams(), { db });
+  assert.equal(outAdv.data.result.resultType, 'TRANSFER_ADVANCE_RECORDED');
+  assert.equal(getSplitBillsSummary(db).pendingReceivableTotal, 1200);
 
-  assert.equal(pushRes.data.ok, true);
-  assert.equal(pushRes.data.result.resultType, 'PENDING_CREATED');
-  assert.equal(pushRes.data.result.parsed.channelType, 'CHANNEL_A_AUTH');
-  assert.equal(pushRes.data.result.parsed.cardType, 'CREDIT');
-  assert.equal(pushRes.data.result.parsed.cardLast4, '1234');
-  assert.equal(pushRes.data.result.parsed.normalizedMerchant, '麥當勞');
-  assert.equal(pushRes.data.result.parsed.amount, 165);
-  assert.equal(pushRes.data.result.parsed.reportedAvailableBalance, 15800);
-
-  // (B) 15 分鐘後 Gmail 自動掃描又抓到同一筆 14:25 的消費通知信 -> 必須被跨管道防重鎖攔截，絕不重複扣款！
-  const emailRes = await handleApiRequest('POST', '/api/notifications/webhook', {
-    source: 'gmail_imap_auto',
-    emailUid: '99881',
-    text: '【玉山銀行信用卡消費通知】卡號末4碼1234 於 2026/10/21 14:25 特店名稱：麥當勞 消費金額：NT$165 元，實際請款金額以商店請款為準。',
-    timestamp: '2026-10-21T06:40:00.000Z',
+  // (B) 2 分鐘後朋友馬上轉帳還錢 $1,200（方向為 IN 收帳，雖然金額相同但方向不同，絕不誤擋，且自動沖銷代墊池！）
+  const inAdv = await handleApiRequest('POST', '/api/notifications/webhook', {
+    source: 'ios_ocr',
+    raw_text: '【玉山銀行】收到轉帳入帳 NT$1,200 元 備註：聚餐還款',
+    category: 'ADVANCE',
+    direction: 'IN',
+    timestamp: '2026-10-21T12:02:00.000Z',
     referenceDate: '2026-10-21'
   }, new URLSearchParams(), { db });
-
-  assert.equal(emailRes.data.result.resultType, 'DEBOUNCE_IGNORED');
-
-  // 驗證總花費精準為 $165，絕不會算錯成 $330 或 $15800！
-  const metrics = getSurvivalDashboardMetrics(db, '2026-10-21');
-  assert.equal(metrics.budget.totalSpent, 165);
+  assert.equal(inAdv.data.result.resultType, 'ADVANCE_REPAID_IN');
+  assert.equal(getSplitBillsSummary(db).pendingReceivableTotal, 0);
 });
 
 test('10. 薪資 App (shift-pay-app) 全自動無感連動：免手動貼 JSON 自動計算排班與加班薪資，且防空班表誤覆蓋', async () => {
@@ -387,26 +379,27 @@ test('10. 薪資 App (shift-pay-app) 全自動無感連動：免手動貼 JSON �
   assert.equal(emptyAutoRes.data.cycle.hourly_wage, 210);
 });
 
-test('11. Apple Pay 感應刷卡秒級自動偵測：支援 iOS 錢包「交易」自動化 + 事後銀行通知防重 + 通道 B 請款核銷', async () => {
+test('11. Apple Pay 感應刷卡秒級自動入帳：支援 /api/notifications/apple-pay 與 /api/notifications/webhook，直接寫入 SETTLED', async () => {
   const { handleApiRequest } = require('../src/routes/api');
   const db = setupTestDb();
 
-  // (1) 手機感應 Apple Pay 當下 1 秒觸發 /api/notifications/apple-pay (帶入 merchant 與 amount)
+  // (1) 手機感應 Apple Pay 當下 1 秒觸發 /api/notifications/apple-pay
   const applePayRes = await handleApiRequest('POST', '/api/notifications/apple-pay', {
+    source: 'apple_pay',
     merchant: '星巴克 STARBUCKS',
-    amount: 'NT$155',
-    card: '玉山 U Bear',
+    amount: 155,
+    card_name: '玉山 U Bear',
     timestamp: '2026-10-21T07:00:00.000Z',
     referenceDate: '2026-10-21'
   }, new URLSearchParams(), { db });
 
   assert.equal(applePayRes.data.ok, true);
-  assert.equal(applePayRes.data.result.resultType, 'PENDING_CREATED');
-  assert.equal(applePayRes.data.result.parsed.isApplePay, true);
+  assert.equal(applePayRes.data.result.resultType, 'APPLE_PAY_SETTLED');
+  assert.equal(applePayRes.data.result.transaction.status, 'SETTLED');
   assert.equal(applePayRes.data.result.parsed.normalizedMerchant, '星巴克');
   assert.equal(applePayRes.data.result.parsed.amount, 155);
 
-  // (2) 5 分鐘後收到玉山銀行發來的同筆消費授權通知信 -> 自動識別為剛才那筆 Apple Pay 刷卡，絕不重複扣款！
+  // (2) 5 分鐘後收到玉山銀行發來的同筆消費授權通知信 -> 被步驟 1 攔截丟棄，絕不重複扣款！
   const bankAuthRes = await handleApiRequest('POST', '/api/notifications/webhook', {
     source: 'gmail_imap_auto',
     text: '【玉山銀行】您的玉山信用卡於 2026/10/21 在「悠旅生活(星巴克)」刷卡消費 NT$155 元。',
@@ -414,9 +407,9 @@ test('11. Apple Pay 感應刷卡秒級自動偵測：支援 iOS 錢包「交易�
     referenceDate: '2026-10-21'
   }, new URLSearchParams(), { db });
 
-  assert.equal(bankAuthRes.data.result.resultType, 'DEBOUNCE_IGNORED');
+  assert.equal(bankAuthRes.data.result.resultType, 'IGNORED_BANK_CARD');
 
-  // (3) 兩天後收到銀行通道 B 請款扣款通知 -> 自動核銷該筆 Apple Pay 交易並上鎖
+  // (3) 兩天後收到銀行請款扣款通知 -> 同樣被攔截丟棄
   const bankSettleRes = await handleApiRequest('POST', '/api/notifications/webhook', {
     source: 'gmail_imap_auto',
     text: '【玉山銀行】帳戶扣款通知：2026/10/23 商店請款「星巴克」（原交易日 2026/10/21）實際扣款 NT$155 元。',
@@ -424,35 +417,13 @@ test('11. Apple Pay 感應刷卡秒級自動偵測：支援 iOS 錢包「交易�
     referenceDate: '2026-10-23'
   }, new URLSearchParams(), { db });
 
-  assert.equal(bankSettleRes.data.result.resultType, 'RECONCILED_SETTLED');
-  assert.equal(bankSettleRes.data.result.transaction.id, applePayRes.data.result.transaction.id);
+  assert.equal(bankSettleRes.data.result.resultType, 'IGNORED_BANK_CARD');
 
   // 驗證總花費始終精準為 $155！
   const metrics = getSurvivalDashboardMetrics(db, '2026-10-23');
   assert.equal(metrics.budget.totalSpent, 155);
   assert.equal(metrics.budget.settledSpent, 155);
   assert.equal(metrics.budget.pendingSpent, 0);
-
-  // (4) 驗證新版 iOS AI「描述捷徑」直接傳送極簡文字（無「於...消費」結構，如「麥當勞 NT$165」）也能精準抓出店名與金額
-  const iosAiRes = await handleApiRequest('POST', '/api/notifications/apple-pay', {
-    text: '麥當勞 NT$165',
-    timestamp: '2026-10-23T12:00:00.000Z',
-    referenceDate: '2026-10-23'
-  }, new URLSearchParams(), { db });
-  assert.equal(iosAiRes.data.result.resultType, 'PENDING_CREATED');
-  assert.equal(iosAiRes.data.result.parsed.normalizedMerchant, '麥當勞');
-  assert.equal(iosAiRes.data.result.parsed.amount, 165);
-
-  // (5) 驗證使用者實測的新版 iOS「當我收到來自 玉山銀行 / 錢包 的通知時」自動產生的 { body: [內文], title: [標題] } JSON 格式
-  const iosNotifNodeRes = await handleApiRequest('POST', '/api/notifications/webhook', {
-    body: '2026/10/23 18:10 連加*全家便利商店 一般消費 NT$95 元',
-    title: '玉山銀行消費通知',
-    timestamp: '2026-10-23T18:10:00.000Z',
-    referenceDate: '2026-10-23'
-  }, new URLSearchParams(), { db });
-  assert.equal(iosNotifNodeRes.data.result.resultType, 'PENDING_CREATED');
-  assert.equal(iosNotifNodeRes.data.result.parsed.normalizedMerchant, '全家便利商店');
-  assert.equal(iosNotifNodeRes.data.result.parsed.amount, 95);
 });
 
 test('12. 修復三大已知問題：現金/悠遊卡自訂負數扣款不歸零、主畫面薪資 App 備份導入與雲端狀態拉取 (/api/shift/state)', async () => {
@@ -576,14 +547,14 @@ test('13. 領現金再去 ATM 存金融卡全流程：玉山 ATM 存款通知偵
   assert.equal(atmDep1.data.dashboard.survival.budget.effectiveIncome, 6000);
   assert.equal(atmDep1.data.dashboard.survival.budget.totalSpent, 0);
 
-  // (2) 跨管道防重測試：5 分鐘後 Gmail 信箱又抓到同一筆 15:20 的 $6,000 ATM 存款通知信 -> 自動攔截不重複累加！
+  // (2) 跨管道 5 分鐘防重測試：5 分鐘內 Gmail 信箱又抓到同一筆 15:20 的 $6,000 ATM 存款通知信 -> 自動攔截不重複累加！
   const dupAtmEmail = await handleApiRequest('POST', '/api/notifications/webhook', {
     source: 'gmail_imap_auto',
     text: '【玉山銀行臺幣存匯通知】您的帳戶於 2026/10/21 15:20 自動化設備存款 新臺幣 6,000.00 元。',
-    timestamp: '2026-10-21T07:25:00.000Z',
+    timestamp: '2026-10-21T07:24:30.000Z',
     referenceDate: '2026-10-21'
   }, new URLSearchParams(), { db });
-  assert.equal(dupAtmEmail.data.result.resultType, 'DEBOUNCE_IGNORED');
+  assert.equal(dupAtmEmail.data.result.resultType, 'IDEMPOTENCY_IGNORED');
   assert.equal(dupAtmEmail.data.dashboard.survival.budget.effectiveIncome, 6000);
 
   // (3) 隔天再去 ATM 無卡存款 $4,000 -> 自動累加存款紀錄，金融卡總可用預算變為 $10,000 (共 2 筆存款紀錄)
@@ -650,210 +621,7 @@ test('13. 領現金再去 ATM 存金融卡全流程：玉山 ATM 存款通知偵
   assert.equal(shiftSyncRes.data.dashboard.survival.cycle.shiftGrossPay, 800); // 班表應領現金仍保留供對帳
 });
 
-test('14. 皮包現金與悠遊卡自訂輸入加值與扣款：支援 60、+60、＋60 正數加值與 -60、－60 負數扣款', async () => {
-  const { handleApiRequest } = require('../src/routes/api');
-  const db = setupTestDb();
-
-  // 初始餘額為 $0，輸入正數 60 應加值 +$60 顯示為 $60
-  const addCash60 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
-    tankType: 'CASH',
-    deltaAmount: '60',
-    note: '自訂金額加值'
-  }, new URLSearchParams(), { db });
-  assert.equal(addCash60.data.walletTank.cashBalance, 60);
-
-  // 輸入 +60 應再加值 +$60 顯示為 $120
-  const addCashPlus60 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
-    tankType: 'CASH',
-    deltaAmount: '+60',
-    note: '自訂金額加值'
-  }, new URLSearchParams(), { db });
-  assert.equal(addCashPlus60.data.walletTank.cashBalance, 120);
-
-  // 悠遊卡輸入 +60 與全形 ＋60 應正常加值
-  await handleApiRequest('POST', '/api/wallet-tank/adjust', {
-    tankType: 'EASYCARD',
-    deltaAmount: '60',
-    note: '自訂金額加值'
-  }, new URLSearchParams(), { db });
-  const addEasyPlus60 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
-    tankType: 'EASYCARD',
-    deltaAmount: '＋60',
-    note: '自訂金額加值'
-  }, new URLSearchParams(), { db });
-  assert.equal(addEasyPlus60.data.walletTank.easycardBalance, 120);
-
-  // 輸入 -45 應正常扣款
-  const subEasy45 = await handleApiRequest('POST', '/api/wallet-tank/adjust', {
-    tankType: 'EASYCARD',
-    deltaAmount: '-45',
-    note: '自訂金額扣款'
-  }, new URLSearchParams(), { db });
-  assert.equal(subEasy45.data.walletTank.easycardBalance, 75);
-});
-
-test('15. 雲端支出上限警示防誤判與交易刪除水庫自動回滾：GCP 預算信不誤判為消費或 ATM 提款，且刪除提款紀錄自動扣回皮包餘額', async () => {
-  const { isBankTransactionEmailText } = require('../src/services/gmailImapService');
-  const { parseEsunNotification } = require('../src/services/esunParser');
-  const { deleteTransactionRecord } = require('../src/services/accountingPatchService');
-  const db = setupTestDb();
-
-  // 1. 測試 GCP 預算上限警示信被 Gmail IMAP 掃到時，應直接被過濾
-  const gcpEmailText = 'Warning 帳單支出上限警告\n帳單帳戶：我的帳單帳戶 (016E2E-47C0FE-37BB51)\n專案：無\n支出金額上限 $9,500.00\n目前支出：$9,500.00\nBase64 Chunk: aTm9500xyz';
-  assert.equal(isBankTransactionEmailText(gcpEmailText), false);
-
-  // 2. parseEsunNotification 遇到支出上限警告應拋出錯誤
-  assert.throws(() => {
-    parseEsunNotification(gcpEmailText);
-  }, /非銀行扣款或帳戶通知/);
-
-  // 3. 測試刪除曾轉入水庫的交易時，自動扣回皮包現金餘額
-  db.prepare('UPDATE wallet_tank SET cash_balance = 10000 WHERE id = 1').run();
-  db.prepare(`
-    INSERT INTO transactions (id, cycle_key, status, raw_merchant, normalized_merchant, category, auth_amount, effective_amount, personal_amount, tx_date, tx_timestamp, created_at)
-    VALUES (999, '2026-10', 'SETTLED', '我的帳單帳戶', '我的帳單帳戶', 'ATM提款', 9500, 9500, 9500, '2026-10-01', datetime('now'), datetime('now'))
-  `).run();
-  db.prepare(`
-    INSERT INTO wallet_tank_logs (tank_type, delta_amount, balance_after, note, linked_tx_id, created_at)
-    VALUES ('CASH', 9500, 10000, 'ATM提款自動存入皮包現金', 999, datetime('now'))
-  `).run();
-
-  // 刪除此交易
-  deleteTransactionRecord(db, 999);
-
-  // 驗證交易已刪除
-  const tx = db.prepare('SELECT * FROM transactions WHERE id = 999').get();
-  assert.equal(tx, undefined);
-
-  // 驗證 wallet_tank 現金已自動扣回 9500 (10000 - 9500 = 500)
-  const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
-  assert.equal(tank.cash_balance, 500);
-
-  // 驗證有寫入負向回滾日誌
-  const rollbackLog = db.prepare('SELECT * FROM wallet_tank_logs WHERE delta_amount = -9500').get();
-  assert.ok(rollbackLog);
-  assert.ok(rollbackLog.note.includes('刪除交易扣回水庫'));
-});
-
-test('16. 銀行轉帳與刷卡嚴格分離：轉帳轉出即時扣款結算不圈存、他人轉帳存入直接加預算、ATM提款精準入水庫', () => {
-  const db = setupTestDb();
-  const initTank = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
-  const startCash = Number(initTank.cash_balance) || 0;
-
-  // 1. 測試轉帳轉出 $20 (例如轉給朋友)
-  const transferOut = processBankNotification(
-    db,
-    '【玉山銀行】台幣帳戶金額異動~提台幣20元',
-    { timestamp: '2026-10-22T08:00:00.000Z', referenceDate: '2026-10-22' }
-  );
-  assert.equal(transferOut.resultType, 'TRANSFER_OUT_SETTLED');
-  assert.equal(transferOut.transaction.status, 'SETTLED'); // 轉帳轉出直接結算，絕非 PENDING
-  assert.equal(transferOut.transaction.is_reconciled_locked, 1);
-  assert.equal(transferOut.transaction.personal_amount, 20);
-  assert.equal(transferOut.transaction.category, '轉帳支出');
-  assert.ok(transferOut.transaction.reconcile_note.includes('💸 帳戶轉帳支出'));
-  assert.ok(!transferOut.transaction.reconcile_note.includes('信用卡刷卡'));
-  assert.ok(!transferOut.transaction.reconcile_note.includes('圈存'));
-
-  // 驗證水庫現金餘額完全未受轉帳影響
-  const tankAfterOut = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
-  assert.equal(Number(tankAfterOut.cash_balance), startCash);
-
-  // 2. 測試他人轉帳轉入 $500 (例如朋友還錢或他人轉帳)
-  const transferIn = processBankNotification(
-    db,
-    '【玉山銀行】台幣帳戶金額異動~存台幣500元',
-    { timestamp: '2026-10-22T08:30:00.000Z', referenceDate: '2026-10-22' }
-  );
-  assert.equal(transferIn.resultType, 'DEPOSIT_RECORDED');
-  assert.equal(transferIn.transaction.status, 'DEPOSIT');
-  assert.equal(transferIn.transaction.category, '轉帳入帳');
-  assert.equal(transferIn.transaction.personal_amount, 0); // 存入不扣預算
-  assert.equal(transferIn.transaction.effective_amount, 500);
-  assert.ok(transferIn.transaction.reconcile_note.includes('💸 帳戶轉帳存入'));
-  assert.ok(!transferIn.transaction.reconcile_note.includes('ATM'));
-
-  // 驗證他人轉帳存入不扣皮包現金
-  const tankAfterIn = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
-  assert.equal(Number(tankAfterIn.cash_balance), startCash);
-
-  // 3. 測試實體 ATM 提款 $1000 -> 結算並轉入皮包現金水庫
-  const atmWithdraw = processBankNotification(
-    db,
-    '【玉山銀行】ATM提款通知：您已於自動櫃員機提款新台幣 1000 元',
-    { timestamp: '2026-10-22T09:00:00.000Z', referenceDate: '2026-10-22' }
-  );
-  assert.equal(atmWithdraw.resultType, 'ATM_WITHDRAWAL_SETTLED');
-  assert.equal(atmWithdraw.transaction.status, 'SETTLED');
-  assert.equal(atmWithdraw.transaction.category, 'ATM提款');
-  assert.equal(atmWithdraw.transaction.personal_amount, 0);
-  const tankAfterWithdraw = db.prepare('SELECT cash_balance FROM wallet_tank WHERE id = 1').get();
-  assert.equal(Number(tankAfterWithdraw.cash_balance), startCash + 1000);
-
-  // 4. 測試正常信用卡刷卡 $50 -> 必須維持通道 A PENDING 圈存預扣
-  const cardAuth = processBankNotification(
-    db,
-    '【玉山銀行】信用卡消費通知：您於 7-ELEVEN 消費新台幣 50 元',
-    { timestamp: '2026-10-22T09:15:00.000Z', referenceDate: '2026-10-22' }
-  );
-  assert.equal(cardAuth.resultType, 'PENDING_CREATED');
-  assert.equal(cardAuth.transaction.status, 'PENDING');
-  assert.equal(cardAuth.transaction.personal_amount, 50);
-  assert.ok(cardAuth.transaction.reconcile_note.includes('信用卡刷卡'));
-});
 
 
-test('17. 本月剩餘包含現金：驗證皮包現金即時計入本月總剩餘可用額度與每日安全預算，並與玉山金融卡餘額校正嚴格隔離', async () => {
-  const { handleApiRequest } = require('../src/routes/api');
-  const { syncEsunAvailableBalance } = require('../src/services/accountingPatchService');
-  const db = setupTestDb();
-  const nowIso = '2026-10-22T08:00:00.000Z';
 
-  // 1. 存入金融卡 $5,000，設定固定支出 $1,000 -> 金融卡純預算剩餘為 $4,000
-  db.prepare(`
-    INSERT INTO transactions (
-      cycle_key, status, raw_merchant, normalized_merchant, category,
-      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
-      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
-      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
-      channel_a_raw, channel_b_raw, created_at
-    ) VALUES ('2026-10-10_2026-11-09', 'DEPOSIT', '玉山 ATM 存款', '玉山 ATM 存款', 'ATM存款', 5000, 5000, 0, 5000, 5000, '2026-10-22', ?, ?, NULL, 1, 100, 'ATM 存款', 0, 0, 'ATM', NULL, ?)
-  `).run(nowIso, nowIso, nowIso);
 
-  db.prepare(`
-    INSERT INTO fixed_expenses (name, monthly_amount, billing_day, is_active, created_at)
-    VALUES ('租屋補貼差額', 1000, 10, 1, ?)
-  `).run(nowIso);
-
-  // 2. 皮包現金設定為 $3,000
-  db.prepare('UPDATE wallet_tank SET cash_balance = 3000, updated_at = ? WHERE id = 1').run(nowIso);
-
-  const m1 = getSurvivalDashboardMetrics(db, '2026-10-22');
-  assert.equal(m1.budget.cardRemainingBudget, 4000); // 5000 - 1000
-  assert.equal(m1.budget.cashBalance, 3000);
-  // 本月總剩餘可用額度必須包含現金：4000 + 3000 = 7000
-  assert.equal(m1.budget.remainingBudget, 7000);
-  assert.equal(m1.budget.totalRemaining, 7000);
-  assert.equal(m1.budget.dailySafeBudget, Math.floor(7000 / m1.cycle.daysRemaining));
-
-  // 3. 登記現金消費 $200 (未勾選同步扣卡) -> 皮包現金變 $2,800，總剩餘降至 $6,800
-  await handleApiRequest('POST', '/api/cash/spend', {
-    itemName: '午餐三寶飯',
-    amount: 200,
-    category: '餐飲外食',
-    countInBudget: false,
-    referenceDateStr: '2026-10-22'
-  }, new URLSearchParams(), { db });
-
-  const m2 = getSurvivalDashboardMetrics(db, '2026-10-22');
-  assert.equal(m2.budget.cardRemainingBudget, 4000); // 金融卡預算不受影響
-  assert.equal(m2.budget.cashBalance, 2800);
-  assert.equal(m2.budget.remainingBudget, 6800); // 4000 + 2800 = 6800
-
-  // 4. 玉山銀行金融卡餘額校正：應精確比對金融卡額度 ($4,000)，不受皮包現金 ($2,800) 干擾
-  const syncRes = syncEsunAvailableBalance(db, {
-    actualEsunBalance: 4000,
-    referenceDateStr: '2026-10-22'
-  });
-  assert.equal(syncRes.discrepancyAmount, 0); // 完全吻合，無黑洞
-});

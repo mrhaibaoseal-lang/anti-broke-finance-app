@@ -1,10 +1,15 @@
 'use strict';
 
-const { parseEsunNotification, computeMerchantSimilarity, normalizeMerchant } = require('./esunParser');
+const {
+  parseEsunNotification,
+  computeMerchantSimilarity,
+  normalizeMerchant,
+  isBankCardNotification,
+  classifyTransaction
+} = require('./esunParser');
 const { ensureCurrentCycle, applyActualSalaryDeposit } = require('./survivalEngine');
 
-const DEBOUNCE_WINDOW_MS = 3 * 60 * 1000; // 3 分鐘防抖動鎖 (180,000 ms)
-const FX_TOLERANCE_RATIO = 0.06;          // 海外匯差與 1.5% 手續費 ±6% 容許誤差
+const TRANSFER_IDEMPOTENCY_WINDOW_MS = 5 * 60 * 1000; // 5 分鐘轉帳/收帳防重複鎖 (300,000 ms)
 
 function daysBetween(dateA, dateB) {
   const a = new Date(`${String(dateA).slice(0, 10)}T00:00:00`).getTime();
@@ -25,68 +30,49 @@ function creditWalletTankFromTx(db, tankType, amount, note, txId, nowIso) {
   `).run(tankType, Number(amount), newBalance, note, txId, nowIso);
 }
 
-function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
+/**
+ * 【步驟 3：轉帳與收帳 5 分鐘內相同金額與方向的防重複鎖 (Idempotency Check)】
+ * 若 5 分鐘 (300,000 ms) 內已有相同金額與相同方向 (IN / OUT) 的轉帳或收帳紀錄，直接忽略不寫入
+ */
+function checkTransferIdempotencyLock(db, amount, direction, nowIso, emailUid = null) {
   const nowMs = new Date(nowIso).getTime();
-  const recentLogs = db.prepare(`
-    SELECT id, received_at, linked_tx_id, raw_text
-    FROM notification_logs
-    WHERE channel_type = 'CHANNEL_A_AUTH' AND dedupe_hash = ?
-    ORDER BY id DESC LIMIT 5
-  `).all(dedupeHash);
+  const normDir = String(direction || 'OUT').toUpperCase() === 'IN' ? 'IN' : 'OUT';
+  const targetHash = `TRANSFER_${normDir}|${Number(amount)}`;
 
-  for (const log of recentLogs) {
-    const diffMs = Math.abs(nowMs - new Date(log.received_at).getTime());
-    if (diffMs <= DEBOUNCE_WINDOW_MS) {
+  const logs = db.prepare('SELECT * FROM notification_logs ORDER BY id DESC LIMIT 100').all();
+
+  if (emailUid) {
+    const uidTag = `[UID:${emailUid}]`;
+    const hitUid = logs.find(l => String(l.action_taken || '').includes(uidTag) || String(l.raw_text || '').includes(uidTag));
+    if (hitUid) {
       return {
         isDuplicate: true,
-        diffSeconds: Math.round(diffMs / 1000),
-        originalTxId: log.linked_tx_id
-      };
-    }
-    if (parsed && parsed.txTimeMinute && log.raw_text && log.raw_text.includes(parsed.txTimeMinute)) {
-      return {
-        isDuplicate: true,
-        diffSeconds: Math.round(diffMs / 1000),
-        originalTxId: log.linked_tx_id,
-        reason: 'SAME_TX_TIME_MINUTE'
+        diffSeconds: 0,
+        originalTxId: hitUid.linked_tx_id,
+        reason: 'SAME_EMAIL_UID'
       };
     }
   }
 
-  // 進階跨管道防重（例如：Apple Pay 感應秒級入帳後，玉山推播或 Gmail 信件幾分鐘後才收進來；或具有相同 Email UID / 刷卡時間 HH:mm / 授權碼 AuthCode）
-  if (parsed) {
-    if (parsed.emailUid) {
-      const logs = db.prepare('SELECT * FROM notification_logs ORDER BY id DESC LIMIT 100').all();
-      const uidTag = `[UID:${parsed.emailUid}]`;
-      const hitLog = logs.find(l => String(l.action_taken || '').includes(uidTag) || String(l.raw_text || '').includes(uidTag));
-      if (hitLog) {
-        return { isDuplicate: true, diffSeconds: 0, originalTxId: hitLog.linked_tx_id, reason: 'SAME_EMAIL_UID' };
-      }
-    }
-    const candidates = db.prepare(`
-      SELECT * FROM transactions
-      WHERE status IN ('PENDING', 'TEMP_HOLD') AND is_reconciled_locked = 0
-      ORDER BY tx_date ASC, tx_timestamp ASC, id ASC
-    `).all();
-    for (const tx of candidates) {
-      if (tx.tx_date !== parsed.txDate || Number(tx.auth_amount) !== Number(parsed.amount)) continue;
-      const sim = computeMerchantSimilarity(tx.normalized_merchant, parsed.normalizedMerchant);
-      if (sim < 0.7) continue;
+  for (const log of logs) {
+    if (log.channel_type === 'IGNORED_DEBOUNCE' || log.channel_type === 'IGNORED_CARD_TX') continue;
 
-      if (parsed.authCode && tx.auth_code && parsed.authCode === tx.auth_code) {
-        return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_AUTH_CODE' };
-      }
-      if (parsed.txTimeMinute && tx.channel_a_raw && tx.channel_a_raw.includes(parsed.txTimeMinute)) {
-        return { isDuplicate: true, diffSeconds: 0, originalTxId: tx.id, reason: 'SAME_TX_TIME_MINUTE' };
-      }
-      // Apple Pay + 銀行雙重通道 A 防重：若其中一筆為 Apple Pay 感應紀錄，且另一筆為 30 分鐘內的銀行同店同金額刷卡通知，自動視為同一筆消費不重複扣款
-      const existingIsApplePay = /APPLE\s*PAY|感應刷卡/i.test(`${tx.channel_a_raw || ''} ${tx.reconcile_note || ''}`);
-      if (existingIsApplePay !== Boolean(parsed.isApplePay)) {
-        const txTimeMs = new Date(tx.tx_timestamp || tx.created_at || nowIso).getTime();
-        if (Math.abs(nowMs - txTimeMs) <= 30 * 60 * 1000) {
-          return { isDuplicate: true, diffSeconds: Math.round(Math.abs(nowMs - txTimeMs) / 1000), originalTxId: tx.id, reason: 'APPLE_PAY_BANK_MERGED' };
-        }
-      }
+    const logTimeMs = new Date(log.received_at).getTime();
+    const diffMs = Math.abs(nowMs - logTimeMs);
+    if (diffMs > TRANSFER_IDEMPOTENCY_WINDOW_MS) continue;
+
+    const isSameHash = log.dedupe_hash === targetHash;
+    const logDir = (log.channel_type === 'DEPOSIT_IN' || log.channel_type === 'SALARY_IN' || log.channel_type === 'TRANSFER_IN' || String(log.dedupe_hash || '').startsWith('TRANSFER_IN|'))
+      ? 'IN'
+      : ((log.channel_type === 'TRANSFER_OUT' || String(log.dedupe_hash || '').startsWith('TRANSFER_OUT|')) ? 'OUT' : null);
+
+    if (isSameHash || (logDir === normDir && Number(log.amount) === Number(amount))) {
+      return {
+        isDuplicate: true,
+        diffSeconds: Math.round(diffMs / 1000),
+        originalTxId: log.linked_tx_id,
+        reason: 'IDEMPOTENCY_5MIN_SAME_AMOUNT_DIRECTION'
+      };
     }
   }
 
@@ -94,109 +80,213 @@ function checkDebounceDuplicate(db, dedupeHash, nowIso, parsed = null) {
 }
 
 /**
- * 2.2 & 2.3 通道 B 核銷配對演算法 (1-to-1 Lock + 權重配對 + FIFO + ±6% 海外匯差自動修正)
+ * 已停用舊版銀行雙通道 PENDING -> SETTLED 核銷演算法（保留空殼維持介面相容）
  */
-function findBestPendingMatch(db, parsed, referenceDateStr) {
-  const refDate = (referenceDateStr || parsed.eventDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
-
-  const candidates = db.prepare(`
-    SELECT * FROM transactions
-    WHERE status IN ('PENDING', 'TEMP_HOLD') AND is_reconciled_locked = 0
-    ORDER BY tx_date ASC, tx_timestamp ASC, id ASC
-  `).all().filter(tx => {
-    const ageDays = daysBetween(tx.tx_date, refDate);
-    return ageDays >= -1 && ageDays <= 30;
-  });
-
-  if (candidates.length === 0) return null;
-
-  // 第一階段：金額 100% 相符（或加油站 TEMP_HOLD 預授權轉實扣）
-  // 權重：金額相符 (60%) + 原始消費日期相符 (30%) + 商店關鍵字相符 (10%)
-  const exactMatches = [];
-  for (const tx of candidates) {
-    const merchantSim = computeMerchantSimilarity(tx.normalized_merchant, parsed.normalizedMerchant);
-    const isGasTempHoldMatch = tx.status === 'TEMP_HOLD' && merchantSim >= 0.6;
-    const isExactAmount = tx.auth_amount === parsed.amount;
-
-    if (!isExactAmount && !isGasTempHoldMatch) continue;
-    if (merchantSim < 0.35 && tx.auth_code !== parsed.authCode) continue;
-
-    const amountWeight = 60;
-    let dateWeight = 15;
-    if (parsed.originalTxDate) {
-      if (tx.tx_date === parsed.originalTxDate) dateWeight = 30;
-      else if (Math.abs(daysBetween(tx.tx_date, parsed.originalTxDate)) <= 1) dateWeight = 15;
-      else dateWeight = 0;
-    }
-
-    const merchantWeight = Number((merchantSim * 10).toFixed(2));
-    const authCodeBonus = (parsed.authCode && tx.auth_code && parsed.authCode === tx.auth_code) ? 5 : 0;
-    const totalScore = Number((amountWeight + dateWeight + merchantWeight + authCodeBonus).toFixed(2));
-
-    exactMatches.push({
-      tx,
-      score: totalScore,
-      merchantSim,
-      matchType: isGasTempHoldMatch ? 'GAS_PREAUTH_SETTLE' : 'EXACT_FIFO_MATCH',
-      fxFeeDiff: 0
-    });
-  }
-
-  if (exactMatches.length > 0) {
-    exactMatches.sort((a, b) => b.score - a.score);
-    return exactMatches[0];
-  }
-
-  // 第二階段：跨國交易匯差與 1.5% 手續費自動修正 (±6% 容許誤差比對)
-  const fxMatches = [];
-  for (const tx of candidates) {
-    if (tx.status !== 'PENDING' || tx.auth_amount <= 0) continue;
-    const merchantSim = computeMerchantSimilarity(tx.normalized_merchant, parsed.normalizedMerchant);
-    if (merchantSim < 0.5) continue;
-
-    const diffRatio = Math.abs(parsed.amount - tx.auth_amount) / tx.auth_amount;
-    if (diffRatio <= FX_TOLERANCE_RATIO) {
-      let dateWeight = 15;
-      if (parsed.originalTxDate) {
-        if (tx.tx_date === parsed.originalTxDate) dateWeight = 30;
-        else if (Math.abs(daysBetween(tx.tx_date, parsed.originalTxDate)) <= 2) dateWeight = 15;
-        else continue;
-      }
-      const amountAccuracyScore = Number(((1 - diffRatio) * 60).toFixed(2));
-      const merchantWeight = Number((merchantSim * 10).toFixed(2));
-      const totalScore = Number((amountAccuracyScore + dateWeight + merchantWeight).toFixed(2));
-
-      fxMatches.push({
-        tx,
-        score: totalScore,
-        merchantSim,
-        matchType: 'FX_TOLERANCE_MATCH',
-        fxFeeDiff: parsed.amount - tx.auth_amount,
-        diffPercent: Number((diffRatio * 100).toFixed(2))
-      });
-    }
-  }
-
-  if (fxMatches.length > 0) {
-    fxMatches.sort((a, b) => b.score - a.score);
-    return fxMatches[0];
-  }
-
+function findBestPendingMatch() {
   return null;
 }
 
-function processBankNotification(db, rawText, options = {}) {
-  const nowIso = options.timestamp || new Date().toISOString();
-  const refDate = (options.referenceDate || nowIso.slice(0, 10)).slice(0, 10);
-  const source = options.source || 'manual';
+/**
+ * 【步驟 2：乾淨的 Apple Pay 專用接收處理】
+ * 接收來自 iOS Apple Pay 捷徑的 JSON：{ source: "apple_pay", amount, merchant, card_name, timestamp }
+ * 進來時直接視為已確認交易 (SETTLED) 並直接扣減當日與當月安全預算
+ */
+function processApplePayTransaction(db, payload = {}, options = {}) {
+  const rawTimestamp = payload.timestamp || options.timestamp || new Date().toISOString();
+  const parsedDt = new Date(rawTimestamp);
+  const nowIso = Number.isNaN(parsedDt.getTime()) ? new Date().toISOString() : parsedDt.toISOString();
+  const refDate = (options.referenceDate || payload.referenceDate || nowIso.slice(0, 10)).slice(0, 10);
 
-  const parsed = parseEsunNotification(rawText, { referenceDate: refDate });
-  if (options.emailUid) {
-    parsed.emailUid = String(options.emailUid);
+  const rawAmtStr = String(payload.amount ?? payload.money ?? payload.price ?? '').replace(/,/g, '').trim();
+  const amtMatch = rawAmtStr.match(/(\d+(?:\.\d+)?)/);
+  const amount = amtMatch ? Math.round(Number(amtMatch[1])) : 0;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Apple Pay 交易金額必須大於 0');
+  }
+
+  const rawMerchant = String(payload.merchant || payload.store || payload.shop || payload.name || '未知商店').trim() || '未知商店';
+  const cardName = String(payload.card_name || payload.cardName || payload.card || 'Apple Pay').trim() || 'Apple Pay';
+  const normalizedMerchant = normalizeMerchant(rawMerchant);
+  const classification = classifyTransaction(rawMerchant, normalizedMerchant, amount, `Apple Pay ${cardName} ${rawMerchant}`, 'APPLE_PAY');
+
+  const cycle = ensureCurrentCycle(db, refDate);
+  const dedupeHash = `APPLE_PAY|${normalizedMerchant}|${amount}`;
+  const reconcileNote = `🍎 Apple Pay 即時確認入帳（${cardName} · 已直接確認 SETTLED 並扣減安全預算 $${amount.toLocaleString()}）`;
+  const rawSummary = JSON.stringify({
+    source: 'apple_pay',
+    amount,
+    merchant: rawMerchant,
+    card_name: cardName,
+    timestamp: nowIso
+  });
+
+  const insertRes = db.prepare(`
+    INSERT INTO transactions (
+      cycle_key, status, raw_merchant, normalized_merchant, category,
+      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+      channel_a_raw, channel_b_raw, created_at
+    ) VALUES (?, 'SETTLED', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, 1, 100, ?, ?, 0, ?, NULL, ?)
+  `).run(
+    cycle.cycle_key,
+    rawMerchant,
+    normalizedMerchant,
+    classification.category,
+    amount,
+    amount,
+    amount,
+    amount,
+    refDate,
+    nowIso,
+    nowIso,
+    reconcileNote,
+    classification.isForeignTx ? 1 : 0,
+    rawSummary,
+    nowIso
+  );
+
+  const txId = Number(insertRes.lastInsertRowid);
+
+  // 保護區連動：若 Apple Pay 為悠遊卡自動加值，自動注入電子票證水庫
+  if (classification.walletTankType) {
+    creditWalletTankFromTx(
+      db,
+      classification.walletTankType,
+      amount,
+      `Apple Pay 自動轉入水庫：${normalizedMerchant} +$${amount}`,
+      txId,
+      nowIso
+    );
+  }
+
+  db.prepare(`
+    INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+    VALUES (?, 'APPLE_PAY_SETTLED', ?, ?, ?, ?, ?, ?, ?)
+  `).run('apple_pay', normalizedMerchant, amount, dedupeHash, reconcileNote, txId, rawSummary, nowIso);
+
+  return {
+    resultType: 'APPLE_PAY_SETTLED',
+    channelType: 'APPLE_PAY_SETTLED',
+    source: 'apple_pay',
+    cardName,
+    message: reconcileNote,
+    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+    parsed: {
+      source: 'apple_pay',
+      rawMerchant,
+      normalizedMerchant,
+      cardName,
+      amount,
+      txDate: refDate,
+      category: classification.category,
+      isForeignTx: classification.isForeignTx,
+      walletTankType: classification.walletTankType
+    }
+  };
+}
+
+function processBankNotification(db, rawInput, options = {}) {
+  const isObjInput = rawInput && typeof rawInput === 'object';
+  const payloadObj = isObjInput ? rawInput : {};
+  const rawTimestamp = payloadObj.timestamp || options.timestamp || new Date().toISOString();
+  const parsedDt = new Date(rawTimestamp);
+  const nowIso = Number.isNaN(parsedDt.getTime()) ? new Date().toISOString() : parsedDt.toISOString();
+  const refDate = (options.referenceDate || payloadObj.referenceDate || nowIso.slice(0, 10)).slice(0, 10);
+  const source = String(payloadObj.source || options.source || 'manual').trim();
+
+  // 【步驟 2：若為 iOS Apple Pay 捷徑專用來源，直接走 Apple Pay 乾淨入帳流程】
+  if (source === 'apple_pay' || source === 'apple_pay_auto') {
+    if (isObjInput && (payloadObj.amount !== undefined || payloadObj.merchant !== undefined)) {
+      return processApplePayTransaction(db, payloadObj, { ...options, timestamp: nowIso, referenceDate: refDate });
+    }
+    if (options.merchant !== undefined && options.amount !== undefined) {
+      return processApplePayTransaction(db, {
+        source: 'apple_pay',
+        amount: options.amount,
+        merchant: options.merchant,
+        card_name: options.card_name || options.cardName || options.card,
+        timestamp: nowIso
+      }, { ...options, referenceDate: refDate });
+    }
+  }
+
+  const rawText = isObjInput
+    ? String(payloadObj.raw_text || payloadObj.rawText || payloadObj.text || '')
+    : String(rawInput || '');
+  const categoryTag = String(
+    payloadObj.category || options.category || payloadObj.categoryTag || options.categoryTag || ''
+  ).trim().toUpperCase();
+  const explicitDirection = payloadObj.direction || options.direction || null;
+  const overrideAmount = payloadObj.amount || options.amount || null;
+  const customMerchant = payloadObj.merchant || payloadObj.debtor_name || payloadObj.debtorName || options.merchant || options.debtorName || null;
+
+  // 【步驟 1：徹底攔截銀行刷卡／簽帳卡消費／授權圈存／商店請款通知】
+  if (isBankCardNotification(rawText)) {
+    const ignoreNote = '🛡️ 已攔截忽略銀行刷卡/簽帳/授權/請款通知（日常刷卡改由 Apple Pay 捷徑原生觸發，避免重複記帳）';
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'IGNORED_CARD_TX', '銀行刷卡通知(已攔截)', 0, 'BLOCKED_BANK_CARD', ?, NULL, ?, ?)
+    `).run(source, ignoreNote, rawText, nowIso);
+
+    return {
+      ignored: true,
+      resultType: 'IGNORED_BANK_CARD',
+      channelType: 'IGNORED_CARD_TX',
+      message: ignoreNote
+    };
+  }
+
+  const parsed = parseEsunNotification(rawText, {
+    referenceDate: refDate,
+    source,
+    categoryTag,
+    direction: explicitDirection,
+    overrideAmount,
+    merchant: customMerchant
+  });
+
+  if (options.emailUid || payloadObj.emailUid) {
+    parsed.emailUid = String(options.emailUid || payloadObj.emailUid);
   }
   const uidSuffix = parsed.emailUid ? ` [UID:${parsed.emailUid}]` : '';
+
+  if (!parsed.amount || parsed.amount <= 0) {
+    return {
+      ignored: true,
+      resultType: 'IGNORED_NO_AMOUNT',
+      channelType: parsed.channelType,
+      message: '未偵測到有效金額，已忽略該通知',
+      parsed
+    };
+  }
+
+  // 【步驟 3：轉帳與收帳寫入前，執行「5 分鐘內相同金額與方向的防重複鎖 (Idempotency Check)」】
+  const idempotency = checkTransferIdempotencyLock(db, parsed.amount, parsed.direction, nowIso, parsed.emailUid);
+  const dedupeHash = `TRANSFER_${parsed.direction}|${parsed.amount}`;
+
+  if (idempotency.isDuplicate) {
+    const dirLabel = parsed.direction === 'IN' ? '收帳/轉入' : '轉帳/轉出';
+    const ignoreMsg = `🛡️ 5分鐘防重複鎖觸發：5 分鐘內已有相同金額 ($${parsed.amount.toLocaleString()}) 與相同方向 (${dirLabel}) 的紀錄，已自動忽略！${uidSuffix}`;
+    db.prepare(`
+      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
+      VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
+    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, idempotency.originalTxId, rawText, nowIso);
+
+    return {
+      ignored: true,
+      isDuplicate: true,
+      resultType: 'IDEMPOTENCY_IGNORED',
+      channelType: parsed.channelType,
+      direction: parsed.direction,
+      amount: parsed.amount,
+      message: ignoreMsg,
+      originalTxId: idempotency.originalTxId,
+      parsed
+    };
+  }
+
   const cycle = ensureCurrentCycle(db, parsed.txDate || refDate);
-  const dedupeHash = `${parsed.normalizedMerchant}|${parsed.amount}`;
 
   // 情境 1：玉山薪資入帳通知 -> 自動以真實入帳金額覆蓋當月預估值，並同步寫入存款紀錄
   if (parsed.channelType === 'SALARY_IN') {
@@ -231,30 +321,61 @@ function processBankNotification(db, rawText, options = {}) {
     };
   }
 
-  // 情境 1.5：金融卡 ATM 存款 / 跨行存款 / 無卡存款 / 帳戶入帳通知 -> 自動新增 DEPOSIT 存款紀錄並計入本月可用資金池
-  if (parsed.channelType === 'DEPOSIT_IN') {
-    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
-    if (debounce.isDuplicate) {
-      const ignoreMsg = `🛡️ 防重複入帳鎖觸發：與既有「${parsed.normalizedMerchant} +$${parsed.amount}」為同一筆存款通知，已自動忽略不重複累加！${uidSuffix}`;
+  // 情境 1.5：收帳／轉帳入帳／ATM 存款通知 (direction === 'IN')
+  if (parsed.direction === 'IN') {
+    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+        .run(parsed.reportedAvailableBalance, nowIso);
+    }
+
+    if (categoryTag === 'ADVANCE') {
+      const openSplits = db.prepare(`
+        SELECT s.*, t.normalized_merchant, t.tx_date, t.status AS tx_status
+        FROM split_bills s
+        LEFT JOIN transactions t ON t.id = s.transaction_id
+        ORDER BY s.is_repaid ASC, s.id DESC
+      `).all();
+      const matchedSplit = openSplits.find(s => !s.is_repaid && Number(s.receivable_amount) === Number(parsed.amount));
+      if (matchedSplit) {
+        db.prepare('UPDATE split_bills SET is_repaid = 1, repaid_at = ? WHERE id = ?').run(nowIso, matchedSplit.id);
+      }
+      const advanceInNote = matchedSplit
+        ? `🤝 代墊款收帳自動沖銷 +$${parsed.amount.toLocaleString()}（已自動結清「${matchedSplit.debtor_name}」之應收代墊款）${uidSuffix}`
+        : `🤝 代墊款收帳入帳 +$${parsed.amount.toLocaleString()}（朋友還款收回，不重複計入薪資預算）${uidSuffix}`;
+
+      const advInRes = db.prepare(`
+        INSERT INTO transactions (
+          cycle_key, status, raw_merchant, normalized_merchant, category,
+          auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+          tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+          reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+          channel_a_raw, channel_b_raw, created_at
+        ) VALUES (?, 'SETTLED', ?, ?, '代墊款收回', ?, ?, 0, ?, 0, ?, ?, ?, NULL, 1, 100, ?, 0, 0, ?, NULL, ?)
+      `).run(
+        cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
+        parsed.amount, parsed.amount, parsed.amount,
+        parsed.txDate, nowIso, nowIso, advanceInNote, rawText, nowIso
+      );
+      const advInTxId = Number(advInRes.lastInsertRowid);
       db.prepare(`
         INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
-      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+        VALUES (?, 'TRANSFER_IN', ?, ?, ?, ?, ?, ?, ?)
+      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, advanceInNote, advInTxId, rawText, nowIso);
 
       return {
-        resultType: 'DEBOUNCE_IGNORED',
-        channelType: 'DEPOSIT_IN',
-        message: ignoreMsg,
-        originalTxId: debounce.originalTxId,
+        resultType: 'ADVANCE_REPAID_IN',
+        channelType: 'TRANSFER_IN',
+        direction: 'IN',
+        category: 'ADVANCE',
+        settledSplitBillId: matchedSplit ? matchedSplit.id : null,
+        message: advanceInNote,
+        transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(advInTxId),
         parsed
       };
     }
 
-    const isTransferIn = parsed.category === '轉帳入帳' || /轉帳|匯款/.test(parsed.normalizedMerchant);
-    let depositNote = isTransferIn
-      ? `💸 帳戶轉帳存入 +${parsed.amount.toLocaleString()}（已直接計入當月可用安全預算池）${uidSuffix}`
-      : `🏧 金融卡存款自動入帳 +${parsed.amount.toLocaleString()}（已直接計入當月可用預算池）${uidSuffix}`;
-    if (options.deductFromWalletCash) {
+    let depositNote = `🏧 金融卡存款/轉帳入帳 +$${parsed.amount.toLocaleString()}（已直接計入本月可用預算池）${uidSuffix}`;
+    if (options.deductFromWalletCash || payloadObj.deductFromWalletCash) {
       const tank = db.prepare('SELECT * FROM wallet_tank WHERE id = 1').get();
       if (tank) {
         const curCash = Number(tank.cash_balance) || 0;
@@ -267,11 +388,6 @@ function processBankNotification(db, rawText, options = {}) {
         `).run(-actualDeducted, newCash, `🏧 拿皮包現金去 ATM 存入金融卡 -$${parsed.amount}`, nowIso);
         depositNote = `🏧 領現轉存金融卡 +$${parsed.amount.toLocaleString()}（已同步從皮包現金扣除並轉入金融卡可用預算）${uidSuffix}`;
       }
-    }
-
-    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
-      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
-        .run(parsed.reportedAvailableBalance, nowIso);
     }
 
     const depRes = db.prepare(`
@@ -289,330 +405,128 @@ function processBankNotification(db, rawText, options = {}) {
     );
 
     const depTxId = Number(depRes.lastInsertRowid);
-    // 亦用 CHANNEL_A_AUTH 相容標籤寫入或保留 DEPOSIT_IN 供 3 分鐘防抖動比對
     db.prepare(`
       INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-      VALUES (?, 'CHANNEL_A_AUTH', ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, 'DEPOSIT_IN', ?, ?, ?, ?, ?, ?, ?)
     `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, depositNote, depTxId, rawText, nowIso);
 
     return {
       resultType: 'DEPOSIT_RECORDED',
       channelType: 'DEPOSIT_IN',
+      direction: 'IN',
       message: depositNote,
       transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(depTxId),
       parsed
     };
   }
 
-  // 情境 2：收到銀行正式「刷退 / 取消授權」通知 -> 沖銷原消費並加回預算（先買後退原則）
-  if (parsed.channelType === 'REFUND') {
-    const targetTx = db.prepare(`
-      SELECT * FROM transactions
-      WHERE status IN ('PENDING', 'SETTLED')
-        AND (normalized_merchant = ? OR auth_amount = ? OR effective_amount = ?)
-      ORDER BY id DESC LIMIT 1
-    `).get(parsed.normalizedMerchant, parsed.amount, parsed.amount);
-
-    if (targetTx) {
-      const note = `已收到銀行正式刷退通知（沖銷原消費 +$${targetTx.personal_amount} 加回安全預算）`;
-      db.prepare(`
-        UPDATE transactions SET status = 'CANCELED', personal_amount = 0, reconcile_note = ? WHERE id = ?
-      `).run(note, targetTx.id);
-
-      db.prepare(`
-        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-        VALUES (?, 'REFUND', ?, ?, ?, ?, ?, ?, ?)
-      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, note, targetTx.id, rawText, nowIso);
-
-      return {
-        resultType: 'REFUND_APPLIED',
-        channelType: 'REFUND',
-        message: note,
-        transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(targetTx.id),
-        parsed
-      };
-    }
+  // 情境 3：轉帳轉出 (direction === 'OUT') —— 支援 OCR 文字解析搭配分類標籤 (EXPENSE / ADVANCE / TRANSFER) 或銀行轉帳通知
+  if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
+    db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
+      .run(parsed.reportedAvailableBalance, nowIso);
   }
 
-  // 情境 2.5：帳戶轉帳轉出 / 即時扣款（TRANSFER_OUT）-> 直接結算扣除可用安全預算，無圈存請款二階段！
-  if (parsed.channelType === 'TRANSFER_OUT') {
-    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
-    if (debounce.isDuplicate) {
-      const ignoreMsg = `🛡️ 防重複扣款鎖觸發：與既有「${parsed.normalizedMerchant} ${parsed.amount}」為同一筆轉帳通知，已自動忽略不重複扣款！${uidSuffix}`;
-      db.prepare(`
-        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
-      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+  const effectiveTag = ['EXPENSE', 'ADVANCE', 'TRANSFER'].includes(categoryTag)
+    ? categoryTag
+    : (['EXPENSE', 'ADVANCE', 'TRANSFER'].includes(parsed.categoryTag) ? parsed.categoryTag : 'EXPENSE');
 
-      return {
-        resultType: 'DEBOUNCE_IGNORED',
-        channelType: 'TRANSFER_OUT',
-        message: ignoreMsg,
-        originalTxId: debounce.originalTxId,
-        parsed
-      };
-    }
+  let personalAmount = parsed.amount;
+  let finalCategory = parsed.category || '一般支出';
+  let reconcileNote = `💸 轉帳支出（已直接確認 SETTLED 並從安全預算扣除 $${parsed.amount.toLocaleString()}）${uidSuffix}`;
+  let resultType = 'TRANSFER_EXPENSE_RECORDED';
 
-    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
-      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
-        .run(parsed.reportedAvailableBalance, nowIso);
-    }
-
-    const note = `💸 帳戶轉帳支出（已立即從當月可用安全預算扣除 ${parsed.amount.toLocaleString()}）${uidSuffix}`;
-    const insertRes = db.prepare(`
-      INSERT INTO transactions (
-        cycle_key, status, raw_merchant, normalized_merchant, category,
-        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
-        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
-        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
-        channel_a_raw, channel_b_raw, created_at
-      ) VALUES (?, 'SETTLED', ?, ?, '轉帳支出', ?, ?, 0, ?, ?, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
-    `).run(
-      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
-      parsed.amount, parsed.amount, parsed.amount, parsed.amount,
-      parsed.txDate, nowIso, nowIso, parsed.authCode, note,
-      rawText, nowIso
-    );
-
-    const txId = Number(insertRes.lastInsertRowid);
-    db.prepare(`
-      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-      VALUES (?, 'TRANSFER_OUT', ?, ?, ?, ?, ?, ?, ?)
-    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, note, txId, rawText, nowIso);
-
-    return {
-      resultType: 'TRANSFER_OUT_SETTLED',
-      channelType: 'TRANSFER_OUT',
-      message: note,
-      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
-      parsed
-    };
+  if (effectiveTag === 'ADVANCE') {
+    personalAmount = 0; // 代墊款不扣個人預算
+    finalCategory = '代墊款';
+    reconcileNote = `🤝 轉帳代墊款 $${parsed.amount.toLocaleString()}（不扣個人預算，已自動移入應收代墊款池 Advance Pool）${uidSuffix}`;
+    resultType = 'TRANSFER_ADVANCE_RECORDED';
+  } else if (effectiveTag === 'TRANSFER') {
+    personalAmount = 0; // 內部互轉不扣個人預算
+    finalCategory = '內部互轉';
+    reconcileNote = `🔄 帳戶內部互轉 $${parsed.amount.toLocaleString()}（自己帳戶調度，不計入個人消費預算）${uidSuffix}`;
+    resultType = 'INTERNAL_TRANSFER_RECORDED';
   }
 
-  // 情境 2.6：實體 ATM 提款（ATM_WITHDRAWAL）-> 結算並存入皮包水庫，不扣消費預算（待花現金時才扣）
-  if (parsed.channelType === 'ATM_WITHDRAWAL') {
-    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
-    if (debounce.isDuplicate) {
-      const ignoreMsg = `🛡️ 防重複鎖觸發：與既有「${parsed.normalizedMerchant} ${parsed.amount}」為同一筆提款通知，已自動忽略！${uidSuffix}`;
-      db.prepare(`
-        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
-      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
+  const insertRes = db.prepare(`
+    INSERT INTO transactions (
+      cycle_key, status, raw_merchant, normalized_merchant, category,
+      auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
+      tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
+      reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
+      channel_a_raw, channel_b_raw, created_at
+    ) VALUES (?, 'SETTLED', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, 1, 100, ?, 0, 0, ?, NULL, ?)
+  `).run(
+    cycle.cycle_key,
+    parsed.rawMerchant,
+    parsed.normalizedMerchant,
+    finalCategory,
+    parsed.amount,
+    parsed.amount,
+    parsed.amount,
+    personalAmount,
+    parsed.txDate,
+    nowIso,
+    nowIso,
+    reconcileNote,
+    rawText,
+    nowIso
+  );
 
-      return {
-        resultType: 'DEBOUNCE_IGNORED',
-        channelType: 'ATM_WITHDRAWAL',
-        message: ignoreMsg,
-        originalTxId: debounce.originalTxId,
-        parsed
-      };
-    }
+  const txId = Number(insertRes.lastInsertRowid);
 
-    if (parsed.reportedAvailableBalance !== null && Number.isFinite(parsed.reportedAvailableBalance)) {
-      db.prepare('UPDATE user_settings SET last_known_bank_balance = ?, updated_at = ? WHERE id = 1')
-        .run(parsed.reportedAvailableBalance, nowIso);
-    }
+  // 若分類為 ADVANCE（代墊款），自動寫入保護區「應收代墊款池 (split_bills)」
+  let splitBill = null;
+  if (effectiveTag === 'ADVANCE') {
+    const debtorName = String(customMerchant || parsed.noteText || parsed.rawMerchant || '朋友代墊').trim() || '朋友代墊';
+    const splitRes = db.prepare(`
+      INSERT INTO split_bills (transaction_id, total_amount, self_amount, receivable_amount, debtor_name, is_repaid, created_at)
+      VALUES (?, ?, 0, ?, ?, 0, ?)
+    `).run(txId, parsed.amount, parsed.amount, debtorName, nowIso);
+    const splitId = Number(splitRes.lastInsertRowid);
+    splitBill = db.prepare('SELECT * FROM split_bills WHERE id = ?').get(splitId);
+  }
 
-    const note = `🏧 ATM提款 +${parsed.amount.toLocaleString()}（已自銀行帳戶轉入皮包現金水庫）${uidSuffix}`;
-    const insertRes = db.prepare(`
-      INSERT INTO transactions (
-        cycle_key, status, raw_merchant, normalized_merchant, category,
-        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
-        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
-        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
-        channel_a_raw, channel_b_raw, created_at
-      ) VALUES (?, 'SETTLED', ?, ?, 'ATM提款', ?, ?, 0, ?, 0, ?, ?, ?, ?, 1, 100, ?, 0, 0, ?, NULL, ?)
-    `).run(
-      cycle.cycle_key, parsed.rawMerchant, parsed.normalizedMerchant,
-      parsed.amount, parsed.amount, parsed.amount,
-      parsed.txDate, nowIso, nowIso, parsed.authCode, note,
-      rawText, nowIso
-    );
-
-    const txId = Number(insertRes.lastInsertRowid);
+  // 若為 ATM 提款領現，同步注入現金水庫 (Wallet Tank)
+  if (parsed.walletTankType) {
     creditWalletTankFromTx(
       db,
-      'CASH',
+      parsed.walletTankType,
       parsed.amount,
-      `ATM提款自動存入皮包現金：+${parsed.amount.toLocaleString()}`,
+      `轉帳/提款自動轉入水庫：${parsed.normalizedMerchant} +$${parsed.amount}`,
       txId,
       nowIso
     );
-
-    db.prepare(`
-      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-      VALUES (?, 'ATM_WITHDRAWAL', ?, ?, ?, ?, ?, ?, ?)
-    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, note, txId, rawText, nowIso);
-
-    return {
-      resultType: 'ATM_WITHDRAWAL_SETTLED',
-      channelType: 'ATM_WITHDRAWAL',
-      message: note,
-      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
-      parsed
-    };
   }
-
-  // 情境 3：通道 A（第 1 次通知：簽帳金融卡消費 / 授權圈存 / 信用卡刷卡）
-  if (parsed.channelType === 'CHANNEL_A_AUTH') {
-    const debounce = checkDebounceDuplicate(db, dedupeHash, nowIso, parsed);
-    if (debounce.isDuplicate) {
-      const ignoreMsg = `🛡️ 防重複扣款鎖觸發：與既有「${parsed.normalizedMerchant} $${parsed.amount}」為同一筆刷卡通知，已自動忽略不重複扣款！${uidSuffix}`;
-      db.prepare(`
-        INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-        VALUES (?, 'IGNORED_DEBOUNCE', ?, ?, ?, ?, ?, ?, ?)
-      `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, ignoreMsg, debounce.originalTxId, rawText, nowIso);
-
-      return {
-        resultType: 'DEBOUNCE_IGNORED',
-        channelType: 'CHANNEL_A_AUTH',
-        message: ignoreMsg,
-        originalTxId: debounce.originalTxId,
-        parsed
-      };
-    }
-
-    let status = 'PENDING';
-    let personalAmount = parsed.amount;
-    const cardLabel = parsed.isApplePay
-      ? '🍎 Apple Pay 感應刷卡'
-      : (parsed.cardType === 'CREDIT' ? '信用卡刷卡' : '簽帳卡圈存');
-    let reconcileNote = `${cardLabel}（已立即從當月可用安全預算精準扣除 $${parsed.amount}）${uidSuffix}`;
-
-    if (parsed.isVerifyAuth) {
-      status = 'AUTH_VERIFY';
-      personalAmount = 0;
-      reconcileNote = '卡片綁定驗證（NT$1~2 不計入消費，14天後自動歸檔）';
-    } else if (parsed.isGasPreAuth) {
-      status = 'TEMP_HOLD';
-      personalAmount = 0;
-      reconcileNote = '⛽ 加油站大額預授權（暫不扣除全額預算，請手動輸入實際加油金額或等請款通知自動扣款）';
-    }
-
-    const insertRes = db.prepare(`
-      INSERT INTO transactions (
-        cycle_key, status, raw_merchant, normalized_merchant, category,
-        auth_amount, settled_amount, fx_fee_diff, effective_amount, personal_amount,
-        tx_date, tx_timestamp, settled_at, auth_code, is_reconciled_locked,
-        reconcile_score, reconcile_note, is_foreign_tx, is_ghost_alerted,
-        channel_a_raw, channel_b_raw, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, NULL, ?, 0, NULL, ?, ?, 0, ?, NULL, ?)
-    `).run(
-      cycle.cycle_key, status, parsed.rawMerchant, parsed.normalizedMerchant, parsed.category,
-      parsed.amount, parsed.amount, personalAmount,
-      parsed.txDate, nowIso, parsed.authCode, reconcileNote, parsed.isForeignTx ? 1 : 0,
-      rawText, nowIso
-    );
-
-    const txId = Number(insertRes.lastInsertRowid);
-
-    if (parsed.walletTankType && status === 'PENDING') {
-      creditWalletTankFromTx(
-        db,
-        parsed.walletTankType,
-        parsed.amount,
-        `銀行圈存自動轉入水庫：${parsed.normalizedMerchant} +$${parsed.amount}`,
-        txId,
-        nowIso
-      );
-    }
-
-    db.prepare(`
-      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-      VALUES (?, 'CHANNEL_A_AUTH', ?, ?, ?, ?, ?, ?, ?)
-    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, reconcileNote, txId, rawText, nowIso);
-
-    return {
-      resultType: status === 'AUTH_VERIFY' ? 'VERIFY_FILTERED' : (status === 'TEMP_HOLD' ? 'GAS_PREAUTH_HOLD' : 'PENDING_CREATED'),
-      channelType: 'CHANNEL_A_AUTH',
-      message: reconcileNote,
-      transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
-      parsed
-    };
-  }
-
-  // 情境 4：通道 B（第 2 次通知：商店請款實際扣款）-> 絕對不直接新增消費，啟動 1-to-1 Lock 核銷演算法
-  const match = findBestPendingMatch(db, parsed, refDate);
-  if (!match) {
-    const warnMsg = `⚠️ 收到通道 B 請款通知（${parsed.normalizedMerchant} $${parsed.amount}），但找不到對應未鎖定之 PENDING 圈存紀錄。為防重複扣款已攔截直接新增，請使用「一鍵餘額校正」核對！`;
-    db.prepare(`
-      INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-      VALUES (?, 'CHANNEL_B_SETTLE', ?, ?, ?, ?, NULL, ?, ?)
-    `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, warnMsg, rawText, nowIso);
-
-    return {
-      resultType: 'UNMATCHED_SETTLEMENT',
-      channelType: 'CHANNEL_B_SETTLE',
-      message: warnMsg,
-      parsed
-    };
-  }
-
-  const matchedTx = match.tx;
-  const fxDiff = match.fxFeeDiff || (parsed.amount - matchedTx.auth_amount);
-
-  const splitRecord = db.prepare('SELECT * FROM split_bills WHERE transaction_id = ? ORDER BY id DESC LIMIT 1').get(matchedTx.id);
-  let newPersonalAmount = parsed.amount;
-  if (splitRecord) {
-    newPersonalAmount = Math.max(0, splitRecord.self_amount + fxDiff);
-  }
-
-  let reconcileNote = `✅ 通道 B 一對一核銷完成 (配對權重 ${match.score}% · FIFO 鎖定)`;
-  if (match.matchType === 'FX_TOLERANCE_MATCH' || fxDiff !== 0) {
-    const sign = fxDiff >= 0 ? `+${fxDiff}` : `${fxDiff}`;
-    reconcileNote = `🌍 匯差與海外手續費自動修正：原圈存 $${matchedTx.auth_amount} ➔ 實扣 $${parsed.amount}（差額 ${sign} 元已同步微調預算）`;
-  } else if (match.matchType === 'GAS_PREAUTH_SETTLE') {
-    reconcileNote = `⛽ 加油站預授權 ($${matchedTx.auth_amount}) 正式請款核銷：實際加油扣款 $${parsed.amount} 元`;
-  }
-
-  db.prepare(`
-    UPDATE transactions
-    SET status = 'SETTLED',
-        settled_amount = ?,
-        fx_fee_diff = ?,
-        effective_amount = ?,
-        personal_amount = ?,
-        settled_at = ?,
-        is_reconciled_locked = 1,
-        reconcile_score = ?,
-        reconcile_note = ?,
-        is_foreign_tx = CASE WHEN ? != 0 THEN 1 ELSE is_foreign_tx END,
-        channel_b_raw = ?
-    WHERE id = ?
-  `).run(
-    parsed.amount, fxDiff, parsed.amount, newPersonalAmount, nowIso,
-    match.score, reconcileNote, fxDiff, rawText, matchedTx.id
-  );
 
   db.prepare(`
     INSERT INTO notification_logs (source, channel_type, normalized_merchant, amount, dedupe_hash, action_taken, linked_tx_id, raw_text, received_at)
-    VALUES (?, 'CHANNEL_B_SETTLE', ?, ?, ?, ?, ?, ?, ?)
-  `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, reconcileNote, matchedTx.id, rawText, nowIso);
+    VALUES (?, 'TRANSFER_OUT', ?, ?, ?, ?, ?, ?, ?)
+  `).run(source, parsed.normalizedMerchant, parsed.amount, dedupeHash, reconcileNote, txId, rawText, nowIso);
 
   return {
-    resultType: 'RECONCILED_SETTLED',
-    channelType: 'CHANNEL_B_SETTLE',
-    matchType: match.matchType,
-    reconcileScore: match.score,
-    fxFeeDiff: fxDiff,
+    resultType,
+    channelType: 'TRANSFER_OUT',
+    direction: 'OUT',
+    category: effectiveTag,
     message: reconcileNote,
-    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(matchedTx.id),
+    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId),
+    splitBill,
     parsed
   };
 }
 
 /**
- * 2.4.2 加油站預授權：使用者手動輸入實際加油金額
+ * 相容保留：手動調整加油金額（直接設為 SETTLED）
  */
 function resolveGasTempHoldManually(db, txId, actualGasAmount) {
   const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(Number(txId));
-  if (!tx) throw new Error('找不到該筆預授權交易');
+  if (!tx) throw new Error('找不到該筆交易');
   const amt = Math.max(0, Math.round(Number(actualGasAmount) || 0));
-  const note = `⛽ 手動輸入實際加油金額 $${amt}（原預授權圈存 $${tx.auth_amount}，仍等待通道 B 最終請款）`;
+  const note = `⛽ 手動確認實際加油金額 $${amt}`;
 
   db.prepare(`
     UPDATE transactions
-    SET status = 'PENDING',
+    SET status = 'SETTLED',
         effective_amount = ?,
         personal_amount = ?,
         reconcile_note = ?
@@ -623,12 +537,12 @@ function resolveGasTempHoldManually(db, txId, actualGasAmount) {
 }
 
 /**
- * 2.4.3 手動將某筆 PENDING 標記為 CANCELED（已退單待解圈），移入「凍結觀察區」
+ * 相容保留：手動將某筆交易標記為 CANCELED
  */
-function markTransactionCanceled(db, txId, reason = '取消訂單/待玉山解圈退回') {
+function markTransactionCanceled(db, txId, reason = '取消交易') {
   const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(Number(txId));
   if (!tx) throw new Error('找不到該筆交易');
-  const note = `❄️ 凍結觀察區（已退單待解圈）：${reason}｜提醒：帳戶餘額 $${tx.auth_amount} 仍被玉山凍結，預計 7~30 天後退回`;
+  const note = `❄️ 已標記取消交易：${reason}`;
 
   db.prepare(`
     UPDATE transactions
@@ -642,39 +556,16 @@ function markTransactionCanceled(db, txId, reason = '取消訂單/待玉山解�
 }
 
 /**
- * 2.4.3 14 天幽靈圈存（取消訂單/刷退）雷達
+ * 相容保留：因為所有消費進系統皆直接確認為 SETTLED，不再產生幽靈圈存
  */
-function scanGhostHolds(db, referenceDateStr) {
-  const refDate = (referenceDateStr || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  const pendings = db.prepare(`
-    SELECT * FROM transactions
-    WHERE status = 'PENDING' AND is_reconciled_locked = 0
-    ORDER BY tx_date ASC, id ASC
-  `).all();
-
-  const ghostAlerts = [];
-  for (const tx of pendings) {
-    const ageDays = daysBetween(tx.tx_date, refDate);
-    if (ageDays >= 14) {
-      if (!tx.is_ghost_alerted) {
-        db.prepare('UPDATE transactions SET is_ghost_alerted = 1 WHERE id = ?').run(tx.id);
-      }
-      ghostAlerts.push({
-        transactionId: tx.id,
-        merchant: tx.normalized_merchant,
-        amount: tx.auth_amount,
-        txDate: tx.tx_date,
-        ageDays,
-        alertText: `🚨 幽靈圈存警報：有筆 $${tx.auth_amount}（${tx.normalized_merchant}，刷卡日 ${tx.tx_date}）已逾 ${ageDays} 天未請款，若已取消訂單請去玉山 Wallet 確認圈存是否已解凍退回！`
-      });
-    }
-  }
-
-  return ghostAlerts;
+function scanGhostHolds() {
+  return [];
 }
 
 module.exports = {
   findBestPendingMatch,
+  checkTransferIdempotencyLock,
+  processApplePayTransaction,
   processBankNotification,
   resolveGasTempHoldManually,
   markTransactionCanceled,
