@@ -6,9 +6,12 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test tests/guardpay.test.js",
-    "deploy": "npx wrangler deploy"
+    "deploy:worker": "npx wrangler deploy",
+    "deploy:pages": "npx wrangler pages deploy public --project-name=anti-broke-finance-app --branch=main --commit-dirty=true",
+    "deploy": "npx wrangler deploy && npx wrangler pages deploy public --project-name=anti-broke-finance-app --branch=main --commit-dirty=true"
   },
   "engines": {
     "node": ">=22.5.0"
   }
 }
+
