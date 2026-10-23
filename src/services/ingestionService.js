@@ -54,7 +54,9 @@ async function evaluateDeduplication(db, {
   const settings = await getSettings(db);
   const windowMinutes = Math.max(1, Number(settings.dedupe_window_minutes) || 10);
   const windowMs = windowMinutes * 60 * 1000;
-  const exactBlockMs = EXACT_BLOCK_WINDOW_SECONDS * 1000;
+  // 5 秒內視為「同一次刷卡觸發雙捷徑或網路瞬間重試」直接攔截；
+  // 超過 5 秒 ~ 10 分鐘內之同金額交易則進入 SUSPECTED_DUPLICATE，讓使用者在首頁一鍵點「✅ 真的買兩次」確認入帳，絕不吃帳！
+  const instantMergeMs = 5 * 1000;
 
   const nowMs = new Date(nowIso || Date.now()).getTime();
   const primaryFingerprint = buildDedupeFingerprint({ direction, amount, normalizedMerchant, cardLast4 });
@@ -79,13 +81,9 @@ async function evaluateDeduplication(db, {
       Number(prev.amount) === Math.round(Number(amount) || 0)
     );
 
-    // 層級 1：2 分鐘內完全相同 payload、或同通道+同主指紋、或兩筆 Apple Pay 捷徑在 60 秒內同金額同時觸發 ➔ 自動攔截不寫入
-    const isDualApplePayShortcut = sourceChannel === 'apple_pay_webhook' &&
-      prev.source_channel === 'apple_pay_webhook' &&
-      diffMs <= 60 * 1000 &&
-      Number(prev.amount) === Math.round(Number(amount) || 0);
-
-    if (diffMs <= exactBlockMs && (isSameExactPayload || isDualApplePayShortcut || (prev.source_channel === sourceChannel && isSamePrimaryFingerprint))) {
+    // 層級 1：5 秒內雙捷徑同時觸發或瞬間網路重送 ➔ 自動攔截不重複寫入
+    const isInstantDualTrigger = diffMs <= instantMergeMs && (isSameExactPayload || isSamePrimaryFingerprint || isSameDirectionAndAmount);
+    if (isInstantDualTrigger) {
       return {
         decision: 'BLOCKED_DUPLICATE',
         fingerprint: primaryFingerprint,
@@ -94,7 +92,7 @@ async function evaluateDeduplication(db, {
       };
     }
 
-    // 層級 2：10 分鐘內相同主指紋，或相同金額+相同方向 (例如轉帳通知重送或截圖+手動貼上) ➔ 標記為疑似重複待確認
+    // 層級 2：5 秒 ~ 10 分鐘內相同金額與方向/商家 (例如隔了 15 秒真的連刷第二筆同價商品) ➔ 絕不吃帳，標記為疑似重複待確認！
     if (isSamePrimaryFingerprint || isSameDirectionAndAmount) {
       return {
         decision: 'FLAGGED_SUSPECTED',

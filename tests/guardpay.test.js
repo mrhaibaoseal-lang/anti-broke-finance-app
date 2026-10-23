@@ -65,8 +65,8 @@ test('2. 雙層 10 分鐘防重複入帳引擎 (2分鐘同通道攔截 + 10分�
   await setMonthlyBaseBudget(db, { baseBudget: 10000 });
 
   const t0 = '2026-10-23T12:00:00.000Z';
-  const t1 = '2026-10-23T12:00:30.000Z'; // 30 秒後捷徑重送
-  const t2 = '2026-10-23T12:05:00.000Z'; // 5 分鐘後同店名同金額
+  const t1 = '2026-10-23T12:00:02.000Z'; // 2 秒後雙捷徑同時觸發
+  const t2 = '2026-10-23T12:00:25.000Z'; // 25 秒後真的買了第 2 杯同金額商品
 
   // 第 1 筆：正常入帳
   const r1 = await ingestApplePayTransaction(db, {
@@ -78,7 +78,7 @@ test('2. 雙層 10 分鐘防重複入帳引擎 (2分鐘同通道攔截 + 10分�
   assert.equal(r1.status, 'ACCEPTED');
   assert.equal(r1.entry.normalized_merchant, '星巴克');
 
-  // 第 2 筆 (30 秒後完全相同)：直接自動攔截 BLOCKED_DUPLICATE
+  // 第 2 筆 (2 秒後雙捷徑同時觸發)：直接自動攔截 BLOCKED_DUPLICATE
   const r2 = await ingestApplePayTransaction(db, {
     amount: 155,
     merchant: '星巴克',
@@ -88,7 +88,7 @@ test('2. 雙層 10 分鐘防重複入帳引擎 (2分鐘同通道攔截 + 10分�
   assert.equal(r2.status, 'BLOCKED_DUPLICATE');
   assert.equal(r2.ignored, true);
 
-  // 第 3 筆 (5 分鐘後同金額同店名)：標記為 SUSPECTED_DUPLICATE，暫不扣減數位預算
+  // 第 3 筆 (25 秒後在 60 秒內真的連買第 2 筆同金額商品)：絕不吃帳，標記為 SUSPECTED_DUPLICATE 讓使用者在首頁一鍵確認！
   const r3 = await ingestApplePayTransaction(db, {
     amount: 155,
     merchant: '星巴克',
